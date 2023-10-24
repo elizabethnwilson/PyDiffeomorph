@@ -43,11 +43,13 @@ class ImageDir:
             im
             for im in input_dir.iterdir()
             if im.is_file() and str(im).endswith((".jpg", ".png", ".webp"))
-        ]  # Gets all the images from user-inputted dir, add complete file type list later
-        self._count = 0  # Need to keep track of iteration in __next__
-        self._images = []
+        ]  # Gets all the images from user-inputted dir, add complete file type set later
+        self._images = []  # Should be a dict so we can .update() it
+        for path in self._image_paths:
+            im = ArrayImage(path)
+            self._images.append(im.upscaled)
 
-    def update(self, input_image: Image.Image):
+    def update(self, input_image: ArrayImage):
         """
         To be called upon completion of an image.
         """
@@ -59,7 +61,7 @@ class ImageDir:
         """
         for im in self._images:
             with im.open():  # Currently saves originals
-                output_file: Path = Path(f"{self._output_dir}/diffeomorphed-{im.name}")
+                output_file = Path(f"{self._output_dir}/diffeomorphed-{im.name}")
                 im.save(fp=output_file)
 
     @property
@@ -81,12 +83,12 @@ def parse_args():
 
 
 def main():
-    parse_args()
     imdir = ImageDir(input_dir, output_dir)  # Call with results from parse_args()
     for im in imdir.image_paths:
         imdir.update(im)
         imdir.save()
 
 
+parse_args()
 if __name__ == "__main__":
     main()
