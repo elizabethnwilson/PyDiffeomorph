@@ -7,32 +7,36 @@ from PIL import Image
 
 
 class ArrayImage:
-    def __init__(self, input_image: Path):
-        with Image.open(input_image).convert(
-            "RGB"
-        ) as im:  # Original script does not use alpha channel
-            self._original_image = im
+    def __init__(self, input_image: Path, upscale=False):
+        """
+        Upscale can be set to true or false for flexibility if using this class as a library.
+        """
+        with Image.open(input_image).convert("RGB") as im:
+            # Original script does not use alpha channel, so only use RGB
+            self._original = im
             # Increase image size per original script
-            self._upscaled_image = im.resize(
-                (im.width * 2, im.height * 2),
-                resample=Image.Resampling.BILINEAR,  # Linear interpolation was used in the experiment
-            )
+            if upscale == True:
+                self._upscaled = im.resize(
+                    (im.width * 2, im.height * 2),
+                    resample=Image.Resampling.BILINEAR,  # Linear interpolation was used in the experiment
+                )
             # Need to get RGB channels into an array of arrays or numpy thing
 
-    def diffeomorph(self):
+    def diffeomorph(self) -> Image.Image:
         """
-        Yields the result of the diffeomorphic scrambling to be saved.
+        Returns the result of the diffeomorphic scrambling to be saved.
+        Done on demand instead of in __init__() to allow for flexibility
+        and possible more efficient memory usage.
         """
-        # For now, just yield the upscaled image for testing.
-        yield self._upscaled_image  # We want to yield since we are going to loop over ImageDir.update()
+        ...
 
     @property
-    def original(self):
-        return self._original_image
+    def original(self) -> Image.Image:
+        return self._original
 
     @property
-    def upscaled(self):
-        return self._upscaled_image
+    def upscaled(self) -> Image.Image:
+        return self._upscaled
 
 
 class ImageDir:
@@ -40,20 +44,15 @@ class ImageDir:
         self._input_dir = input_dir
         self._output_dir = output_dir
         self._image_paths: list = [
-            im
-            for im in input_dir.iterdir()
-            if im.is_file() and str(im).endswith((".jpg", ".png", ".webp"))
+            im_path
+            for im_path in input_dir.iterdir()
+            if im_path.is_file() and str(im_path).endswith((".jpg", ".png", ".webp"))
         ]  # Gets all the images from user-inputted dir, add complete file type set later
-        self._images = []  # Should be a dict so we can .update() it
+        # We only need image_paths until the images have been generated.
+        self._images = []
         for path in self._image_paths:
             im = ArrayImage(path)
             self._images.append(im.upscaled)
-
-    def update(self, input_image: ArrayImage):
-        """
-        To be called upon completion of an image.
-        """
-        self._images.append(input_image)
 
     def save(self):
         """
@@ -68,27 +67,41 @@ class ImageDir:
     def image_paths(self) -> list:
         return self._image_paths
 
+    @property
+    def images(self) -> list:
+        return self._images
 
-def parse_args():
-    """
-    Called regardless of whether script is called on its own or as a library
-    since certain things need to be specified every time
-    """
-    parser = argparse.ArgumentParser(
-        prog="diffeomorphic.py",
-        description="Python implementation of Rhodri Cusack and Bobby Stojanoski's diffeomorphic scrambling MATLAB script.",
-    )
-    parser.add_argument("input_dir", metavar="DIRECTORY", type=Path)
-    parser.add_argument("output_dir", metavar="OUTPUT_DIRECTORY", type=Path)
+    @images.setter
+    def images(self, input_image: Image.Image):
+        """
+        Called every time an image is generated. The object then contains all files to be written when save() is called.
+        """
+        self._images.append(input_image)
+
+
+# Called regardless of whether script is called on its own or as a library
+# since certain things need to be specified every time
+parser = argparse.ArgumentParser(
+    prog="diffeomorphic.py",
+    description="Python implementation of Rhodri Cusack and Bobby Stojanoski's diffeomorphic scrambling MATLAB script.",
+)
+# Need option to specify only one file, in which case output directory can still be specified but is assumed to be the same as the file.
+# Output directory if not specified should either make a new directory "{args.input_dir}-diffeomorphed" or just use args.input_dir.
+parser.add_argument("input_dir", metavar="DIRECTORY", type=Path)
+parser.add_argument("output_dir", metavar="OUTPUT_DIRECTORY", type=Path)
+args = parser.parse_args()
 
 
 def main():
-    imdir = ImageDir(input_dir, output_dir)  # Call with results from parse_args()
-    for im in imdir.image_paths:
-        imdir.update(im)
-        imdir.save()
+    imdir = ImageDir(args.input_dir, args.output_dir)
+
+    for im_path in imdir.image_paths:
+        # Run the diffeomorph for every image in directory
+        im = ArrayImage(im_path)
+        imdir.images = im.upscaled  # Currently using upscaled for testing.
+
+    imdir.save()
 
 
-parse_args()
 if __name__ == "__main__":
     main()
