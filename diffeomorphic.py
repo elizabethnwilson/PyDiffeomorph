@@ -1,9 +1,10 @@
 #!/usr/bin/python
 import argparse
-from math import sin, cos  # sine, cosine used in diffeomoprhic scrambling equation
+import math  # Need cos and pi for random discrete cosine transformations in diffeomorphic scrambling
 import numpy as np
 import pathlib as pl
 from PIL import Image
+import random
 
 
 class ArrayImage:
@@ -109,11 +110,12 @@ class ArrayImageDir:
         return self._images
 
 
-def get_args():
+def setup():
     """
     Called regardless of whether script is called on its own or as a library
     since certain things need to be specified every time
     """
+    random.seed()  # Random number generator must always be seeded. Not using system's random generator so the same results can be generated for testing.
     parser = argparse.ArgumentParser(
         prog="diffeomorphic.py",
         description="Python implementation of Rhodri Cusack and Bobby Stojanoski's diffeomorphic scrambling MATLAB script.",
@@ -153,7 +155,7 @@ def savetest(inputs: list, output_dir: pl.Path):
 
 
 def main():
-    args = get_args()
+    args = setup()
     # run_diffeomorph(args.inputs, args.output_dir)
     savetest(args.inputs, args.output_dir)
 
@@ -161,4 +163,4 @@ def main():
 if __name__ == "__main__":
     main()
 else:
-    args = get_args()  # For if args are supplied to script as a library
+    args = setup()  # For if args are supplied to script as a library
