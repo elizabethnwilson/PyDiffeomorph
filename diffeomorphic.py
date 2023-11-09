@@ -1,16 +1,25 @@
 #!/usr/bin/python
 import argparse
-import math  # Need cos and pi for random discrete cosine transformations in diffeomorphic scrambling
+import math
 import numpy as np
 import pathlib as pl
 from PIL import Image
-import random
 
 
 class ArrayImage:
-    def __init__(self, filepath: pl.Path, upscale=True):
-        with Image.open(filepath).convert("RGB") as im:
-            # Original script does not use alpha channel, so only use RGB
+    # Random-number generator for whole class so we don't re-seed every image
+    _rand = np.random.default_rng()
+
+    def __init__(self, filepath: pl.Path, maxdistortion, nsteps, upscale=True):
+        with Image.open(filepath) as im:
+            if im.mode != "RGBA":
+                # Images have 3 color channels and 1 transparency channel. All images will be output with a transparency channel, saved as pngs.
+                try:
+                    im.convert("RGBA")
+                except ValueError as ve:
+                    print("ERROR: This image could not be converted")
+                    # This really should never run. The only way it would is if the user supplies an image of an accepted type but its data is broken.
+                    raise ve
             self._original = im
             # Increase image size per original script
             if upscale == True:
@@ -18,14 +27,92 @@ class ArrayImage:
                     (im.width * 2, im.height * 2),
                     resample=Image.Resampling.BILINEAR,  # Linear interpolation was used in the experiment
                 )
-            # Need to get RGB channels into an array of arrays or numpy thing in init because that should be the main property of ArrayImage.
+                self._image_array = np.asarray(self._upscaled)
+                self._width = self._upscaled.width
+                self._height = self._upscaled.height
+            else:
+                self._image_array = np.asarray(im)
+                self._width = im.width
+                self._height = im.height
+
+        self._maxdistortion = maxdistortion
+        self._nsteps = nsteps
+
+    def _getdiffeo(self) -> np.ndarray:
+        """
+        This function is a one-to-one recreation of the getdiffeo function from
+        the original script using NumPy.
+        """
+        ncomp: int = 6  # Amount of computations, 6 is used in original script
+        # This is transformed to make the flow field
+        mesh = np.mgrid[
+            1 : self._width, 1 : self._height
+        ]  # mesh[0] is YI, mesh[1] is XI
+
+        # Create diffeomorphic warp field by adding random discrete cosine transformations
+        phase = ArrayImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * math.pi
+        amplitude = ArrayImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
+        xn = np.zeros((self._width, self._height))
+        yn = np.zeros((self._width, self._height))
+
+        # The main form field generation
+        for xc in range(1, ncomp):
+            for yc in range(1, ncomp):
+                xn = xn + amplitude[xc, yc] * math.cos(
+                    xc * mesh[1] / self._width * 2 * math.pi + phase[xc, yc, 1]
+                ) * math.cos(
+                    yc * mesh[0] / self._height * 2 * math.pi + phase[xc, yc, 2]
+                )
+                yn = yn + amplitude[xc, yc] * math.cos(
+                    xc * mesh[1] / self._width * 2 * math.pi + phase[xc, yc, 3]
+                ) * math.cos(
+                    yc * mesh[0] / self._height * 2 * math.pi + phase[xc, yc, 4]
+                )
+
+        # Normalize to root mean square of warps in each direction
+        xn = xn / np.sqrt(
+            np.mean(xn.ravel() ** 2)
+        )  # ravel creates a vectorized array for the squaring operation.
+        yn = yn / np.sqrt(np.mean(yn.ravel() ** 2))
+
+        yin = self._maxdistortion * yn / self._nsteps
+        xin = self._maxdistortion * xn / self._nsteps
+
+        return np.array(xin, yin)
+
+    def _interpolate_image(self):
+        """
+        We want to get array of xin, yin to cx, yx as in the original using that switch statement?
+        Use scipy griddata to do the thing
+        """
+        """
+        Example:
+            # Generate a regular grid
+        XI, YI = np.meshgrid(np.arange(1, imsz[1] + 1), np.arange(1, imsz[0] + 1))
+
+        # Interpolate using griddata
+        interp_img = griddata((cy.flatten(), cx.flatten()), img.reshape(-1, img.shape[2]),
+                              (YI, XI), method='linear', fill_value=0.0)
+
+        # Clip values to [0, 255]
+        interp_img = np.clip(interp_img, 0, 255)
+
+        return interp_img.astype(np.uint8)
+        """
 
     def _diffeomorph(self) -> Image.Image:
         """
         Returns the result of the diffeomorphic scrambling to be saved.
         Done on demand instead of in __init__() to allow for flexibility
         and potentially more efficient memory usage.
+
+        Uses _getdiffeo()'s form field to warp the _image_array created in __init__().
+        This is split into multiple functions to resemble the original script.
+
+        Ability to return each step may be needed since the original script
+        does this by default.
         """
+
         ...
 
     @property
@@ -103,7 +190,9 @@ class ArrayImageDir:
                 raise TypeError(
                     "No operation has been run on these files; they will not be saved."
                 )
-            file.save(pl.Path(f"{self._output_dir}/diffeomorphed-{str(filepath.name)}"))
+            file.save(
+                pl.Path(f"{self._output_dir}/diffeomorphed-{str(filepath.name)}")
+            )  # Make it only pngs
 
     @property
     def images(self) -> dict:
@@ -115,7 +204,6 @@ def setup():
     Called regardless of whether script is called on its own or as a library
     since certain things need to be specified every time
     """
-    random.seed()  # Random number generator must always be seeded. Not using system's random generator so the same results can be generated for testing.
     parser = argparse.ArgumentParser(
         prog="diffeomorphic.py",
         description="Python implementation of Rhodri Cusack and Bobby Stojanoski's diffeomorphic scrambling MATLAB script.",
