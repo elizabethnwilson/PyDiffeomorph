@@ -4,13 +4,20 @@ import math
 import numpy as np
 import pathlib as pl
 from PIL import Image
+from scipy import griddata  # For interpolation
 
 
-class ArrayImage:
+class MatrixImage:
     # Random-number generator for whole class so we don't re-seed every image
     _rand = np.random.default_rng()
 
     def __init__(self, filepath: pl.Path, maxdistortion, nsteps, upscale=True):
+        """
+        Initializes a MatrixImage object with necessary properties for diffeomorphic scrambling.
+
+        Although the original study uses upscaling, it can be disabled here if using as a library
+        in order for flexibility; not all uses of diffeomorphic scrambling may demand upscaling beforehand.
+        """
         with Image.open(filepath) as im:
             if im.mode != "RGBA":
                 # Images have 3 color channels and 1 transparency channel. All images will be output with a transparency channel, saved as pngs.
@@ -27,11 +34,11 @@ class ArrayImage:
                     (im.width * 2, im.height * 2),
                     resample=Image.Resampling.BILINEAR,  # Linear interpolation was used in the experiment
                 )
-                self._image_array = np.asarray(self._upscaled)
+                self._image_matrix = np.asarray(self._upscaled)
                 self._width = self._upscaled.width
                 self._height = self._upscaled.height
             else:
-                self._image_array = np.asarray(im)
+                self._image_matrix = np.asarray(im)
                 self._width = im.width
                 self._height = im.height
 
@@ -50,20 +57,22 @@ class ArrayImage:
         ]  # mesh[0] is YI, mesh[1] is XI
 
         # Create diffeomorphic warp field by adding random discrete cosine transformations
-        phase = ArrayImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * math.pi
-        amplitude = ArrayImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
+        phase = MatrixImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * math.pi
+        amplitude_a = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
+        # Separate amplitudes for x and y were implemented in an update to the original script.
+        amplitude_b = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
         xn = np.zeros((self._width, self._height))
         yn = np.zeros((self._width, self._height))
 
         # The main form field generation
         for xc in range(1, ncomp):
             for yc in range(1, ncomp):
-                xn = xn + amplitude[xc, yc] * math.cos(
+                xn = xn + amplitude_a[xc, yc] * math.cos(
                     xc * mesh[1] / self._width * 2 * math.pi + phase[xc, yc, 1]
                 ) * math.cos(
                     yc * mesh[0] / self._height * 2 * math.pi + phase[xc, yc, 2]
                 )
-                yn = yn + amplitude[xc, yc] * math.cos(
+                yn = yn + amplitude_b[xc, yc] * math.cos(
                     xc * mesh[1] / self._width * 2 * math.pi + phase[xc, yc, 3]
                 ) * math.cos(
                     yc * mesh[0] / self._height * 2 * math.pi + phase[xc, yc, 4]
@@ -80,13 +89,28 @@ class ArrayImage:
 
         return np.array(xin, yin)
 
-    def _interpolate_image(self):
+    def _interpolate_image(self, diffeo_field: np.ndarray):
         """
-        We want to get array of xin, yin to cx, yx as in the original using that switch statement?
-        Use scipy griddata to do the thing
+        Gets matrix of xin, yin to cx, yx.
+
+        The original script creates a figure displaying a continuous circle of images generated in steps.
+        Each quadrant of this circle relative to the beginning represents a new method of diffeomorphic scrambling,
+        generating four sets of images based on nsteps. However, there is no evidence in the paper or in future
+        revisions of the script that any images other than those using a
+        basic interpolation using varying degrees of distortion were used in the Mturk perceptual ratings or in the
+        HMAX model.
+
+        Therefore, this script uses only the basic implementation, rather than generating multiple flow fields and
+        making other transformations (for example, in quadrant 2, the new interpolation would be done using cx = cxf - cxa, etc.)
+
+        Uses SciPy griddata for interpolation.
         """
+        cx = diffeo_field[0]
+        cy = diffeo_field[1]
+
         """
         Example:
+        Modify based on already having flow fields and other variables.
             # Generate a regular grid
         XI, YI = np.meshgrid(np.arange(1, imsz[1] + 1), np.arange(1, imsz[0] + 1))
 
@@ -112,8 +136,11 @@ class ArrayImage:
         Ability to return each step may be needed since the original script
         does this by default.
         """
-
-        ...
+        # Only get one diffeomorphic form field; reasons listed in _interpolate_image()
+        self._diffeo_field: np.ndarray = self._getdiffeo()
+        diffeo_im: np.ndarray = self._interpolate_image(self._diffeo_field)
+        im = Image.fromarray(diffeo_im)
+        return im
 
     @property
     def original(self) -> Image.Image:
@@ -134,11 +161,20 @@ class ArrayImage:
     def diffeomorphed(self) -> Image.Image:
         return self._diffeomorph()
 
+    @property
+    def diffeo_field(self) -> np.ndarray:
+        if self._diffeo_field:
+            return self._diffeo_field
+        else:
+            raise AttributeError(
+                "This image has not been diffeomorphed; there is no diffeomorphic form field to access"
+            )
 
-class ArrayImageDir:
+
+class MatrixImageDir:
     def __init__(self, inputs: list, output_dir: pl.Path):
         """
-        Until an operation has been run on self._images, the values are entire ArrayImage objects.
+        Until an operation has been run on self._images, the values are entire MatrixImage objects.
         Afterward, they become images that can be saved.
         """
         self._inputs: list = inputs
@@ -154,7 +190,7 @@ class ArrayImageDir:
             if input.is_file():
                 # Logic for an input file
                 if input.suffix in self._accepted_file_types:
-                    self._images |= {input: ArrayImage(input)}  # Path: ArrayImage
+                    self._images |= {input: MatrixImage(input)}  # Path: MatrixImage
                 else:
                     raise TypeError(
                         f"Unrecognized file type. Supported file types are: {self._accepted_file_types}"
@@ -163,7 +199,7 @@ class ArrayImageDir:
                 # Logic for an input dir
                 for filepath in input.iterdir():
                     if filepath.suffix in self._accepted_file_types:
-                        self._images |= {filepath: ArrayImage(filepath)}
+                        self._images |= {filepath: MatrixImage(filepath)}
                     else:
                         raise TypeError(
                             f"Unrecognized file type. Supported file types are: {self._accepted_file_types}"
@@ -175,8 +211,8 @@ class ArrayImageDir:
 
     def upscale(self):
         """
-        ArrayImages are upscaled by default due to the specifications in the original research paper.
-        This behavior can be modified by setting upscale=False when instantiating an ArrayImage (such as if you use ArrayImage in a library).
+        MatrixImages are upscaled by default due to the specifications in the original research paper.
+        This behavior can be modified by setting upscale=False when instantiating an MatrixImage (such as if you use MatrixImage in a library).
         """
         for filepath, file in self._images.items():
             self._images |= {filepath: file.upscaled}
@@ -186,7 +222,7 @@ class ArrayImageDir:
         Save all files in the output directory
         """
         for filepath, file in self._images.items():
-            if type(file) == ArrayImage:
+            if type(file) == MatrixImage:
                 raise TypeError(
                     "No operation has been run on these files; they will not be saved."
                 )
@@ -230,14 +266,14 @@ def run_diffeomorph(inputs: list, output_dir: pl.Path):
     """
     Uses an input directory or file and an output directory to find images to run the diffeomorphic scrambling on.
     """
-    imdir = ArrayImageDir(inputs, output_dir)
+    imdir = MatrixImageDir(inputs, output_dir)
     # Run the diffeomorph for every image in directory
     # imdir.diffeomorph()
     imdir.save()
 
 
 def savetest(inputs: list, output_dir: pl.Path):
-    imdir = ArrayImageDir(inputs, output_dir)
+    imdir = MatrixImageDir(inputs, output_dir)
     imdir.upscale()
     imdir.save()
 
