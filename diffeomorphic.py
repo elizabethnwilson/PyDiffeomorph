@@ -23,6 +23,10 @@ class MatrixImage:
                 # Images have 3 color channels and 1 transparency channel. All images will be output with a transparency channel, saved as pngs.
                 try:
                     im.convert("RGBA")
+                    # If the image didn't already have transparency,
+                    # set this to true so resources are not wasted diffeomorphing
+                    # an empty channel
+                    self._no_transparency = True
                 except ValueError as ve:
                     print("ERROR: This image could not be converted")
                     # This really should never run. The only way it would is if the user supplies an image of an accepted type but its data is broken.
@@ -108,21 +112,28 @@ class MatrixImage:
         cx = diffeo_field[0]
         cy = diffeo_field[1]
 
-        """
-        Example:
-        Modify based on already having flow fields and other variables.
-            # Generate a regular grid
-        XI, YI = np.meshgrid(np.arange(1, imsz[1] + 1), np.arange(1, imsz[0] + 1))
+        # Example:
+        # Modify based on already having flow fields and other variables.
+        # Generate a regular grid
+        XI, YI = np.meshgrid(
+            np.arange(1, self._width + 1), np.arange(1, self._height + 1)
+        )
 
         # Interpolate using griddata
-        interp_img = griddata((cy.flatten(), cx.flatten()), img.reshape(-1, img.shape[2]),
-                              (YI, XI), method='linear', fill_value=0.0)
+        interp_image = griddata(
+            (cx.ravel(), cy.ravel()),
+            self._image_matrix.reshape(
+                -1, 2
+            ),  # Test, because we might need to separate channels
+            (XI, YI),
+            method="linear",
+            fill_value=255,
+        )
 
-        # Clip values to [0, 255]
-        interp_img = np.clip(interp_img, 0, 255)
+        # Clip values to [0, 255] TEST - may or may not be necessary
+        interp_image = np.clip(interp_image, 0, 255)
 
-        return interp_img.astype(np.uint8)
-        """
+        return interp_image.astype(np.uint8)  # can be used with Image.fromarray()
 
     def _diffeomorph(self) -> Image.Image:
         """
@@ -139,7 +150,7 @@ class MatrixImage:
         # Only get one diffeomorphic form field; reasons listed in _interpolate_image()
         self._diffeo_field: np.ndarray = self._getdiffeo()
         diffeo_im: np.ndarray = self._interpolate_image(self._diffeo_field)
-        im = Image.fromarray(diffeo_im)
+        im: Image.Image = Image.fromarray(diffeo_im)
         return im
 
     @property
