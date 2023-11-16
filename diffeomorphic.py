@@ -1,4 +1,3 @@
-#!/usr/bin/python
 import argparse
 import math
 import numpy as np
@@ -46,6 +45,9 @@ class MatrixImage:
                 self._width = im.width
                 self._height = im.height
 
+        # Test this, might not work
+        if not self._image_matrix.any(np.nonzero(self._image_matrix)):
+            self._no_transparency = True
         self._maxdistortion = maxdistortion
         self._nsteps = nsteps
 
@@ -56,9 +58,8 @@ class MatrixImage:
         """
         ncomp: int = 6  # Amount of computations, 6 is used in original script
         # This is transformed to make the flow field
-        mesh = np.mgrid[
-            1 : self._width, 1 : self._height
-        ]  # mesh[0] is YI, mesh[1] is XI
+        # mesh[0] is XI, mesh[1] is YI
+        mesh: np.ndarray = np.mgrid[1 : self._width, 1 : self._height]
 
         # Create diffeomorphic warp field by adding random discrete cosine transformations
         phase = MatrixImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * math.pi
@@ -72,14 +73,14 @@ class MatrixImage:
         for xc in range(1, ncomp):
             for yc in range(1, ncomp):
                 xn = xn + amplitude_a[xc, yc] * math.cos(
-                    xc * mesh[1] / self._width * 2 * math.pi + phase[xc, yc, 1]
+                    xc * mesh[0] / self._width * 2 * math.pi + phase[xc, yc, 1]
                 ) * math.cos(
-                    yc * mesh[0] / self._height * 2 * math.pi + phase[xc, yc, 2]
+                    yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 2]
                 )
                 yn = yn + amplitude_b[xc, yc] * math.cos(
-                    xc * mesh[1] / self._width * 2 * math.pi + phase[xc, yc, 3]
+                    xc * mesh[0] / self._width * 2 * math.pi + phase[xc, yc, 3]
                 ) * math.cos(
-                    yc * mesh[0] / self._height * 2 * math.pi + phase[xc, yc, 4]
+                    yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 4]
                 )
 
         # Normalize to root mean square of warps in each direction
@@ -112,23 +113,18 @@ class MatrixImage:
         cx = diffeo_field[0]
         cy = diffeo_field[1]
 
-        # Example:
-        # Modify based on already having flow fields and other variables.
-        # Generate a regular grid
-        XI, YI = np.meshgrid(
-            np.arange(1, self._width + 1), np.arange(1, self._height + 1)
-        )
+        mesh: np.ndarray = np.mgrid[1 : self._width, 1 : self._height]
 
         # Interpolate using griddata
+        # Original script casts to double-might need to do this as well to preserve precision
         interp_image = griddata(
             (cx.ravel(), cy.ravel()),
             self._image_matrix.reshape(
                 -1, 2
-            ),  # Test, because we might need to separate channels
-            (XI, YI),
-            method="linear",
-            fill_value=255,
-        )
+            ),  # Test, because we might (probably) need to separate channels
+            mesh,
+            fill_value=255,  # 127 for gray?; perhaps let users specify bg value.
+        )  # method="linear" is the default
 
         # Clip values to [0, 255] TEST - may or may not be necessary
         interp_image = np.clip(interp_image, 0, 255)
@@ -183,7 +179,9 @@ class MatrixImage:
 
 
 class MatrixImageDir:
-    def __init__(self, inputs: list, output_dir: pl.Path):
+    def __init__(
+        self, inputs: list, output_dir: pl.Path, maxdistortion: int, nsteps: int
+    ):
         """
         Until an operation has been run on self._images, the values are entire MatrixImage objects.
         Afterward, they become images that can be saved.
@@ -196,12 +194,14 @@ class MatrixImageDir:
         self._accepted_file_types: set = {".jpg", ".png", ".webp"}
         self._images: dict = {}
 
-        # Updates self._images dict
+        # Updates self._images dict and initializes MatrixImage objects
         for input in self._inputs:
             if input.is_file():
                 # Logic for an input file
                 if input.suffix in self._accepted_file_types:
-                    self._images |= {input: MatrixImage(input)}  # Path: MatrixImage
+                    self._images |= {
+                        input: MatrixImage(input, maxdistortion, nsteps)
+                    }  # Path: MatrixImage
                 else:
                     raise TypeError(
                         f"Unrecognized file type. Supported file types are: {self._accepted_file_types}"
@@ -210,7 +210,9 @@ class MatrixImageDir:
                 # Logic for an input dir
                 for filepath in input.iterdir():
                     if filepath.suffix in self._accepted_file_types:
-                        self._images |= {filepath: MatrixImage(filepath)}
+                        self._images |= {
+                            filepath: MatrixImage(filepath, maxdistortion, nsteps)
+                        }
                     else:
                         raise TypeError(
                             f"Unrecognized file type. Supported file types are: {self._accepted_file_types}"
@@ -270,14 +272,28 @@ def setup():
         type=pl.Path,
         help="Specify an output directory for the new file. This is required since you can supply multiple files and directories from different locations.",
     )
+    parser.add_argument(
+        "-m",
+        "--maxdistortion",
+        type=int,
+        default=80,
+        help="The maximum amount of distortion to allow. Mturk perceptual ratings based on maxdistortion = 80; defaults to 80.",
+    )
+    parser.add_argument(
+        "-n",
+        "--nsteps",
+        type=int,
+        default=1,
+        help="The amount of gradual steps to generate. Mturk perceptual ratings based on nsteps = 20; however, defaults to 1 to just generate the final image.",
+    )
     return parser.parse_args()
 
 
-def run_diffeomorph(inputs: list, output_dir: pl.Path):
+def run_diffeomorph(inputs: list, output_dir: pl.Path, maxdistortion: int, nsteps: int):
     """
     Uses an input directory or file and an output directory to find images to run the diffeomorphic scrambling on.
     """
-    imdir = MatrixImageDir(inputs, output_dir)
+    imdir = MatrixImageDir(inputs, output_dir, maxdistortion, nsteps)
     # Run the diffeomorph for every image in directory
     # imdir.diffeomorph()
     imdir.save()
@@ -291,8 +307,8 @@ def savetest(inputs: list, output_dir: pl.Path):
 
 def main():
     args = setup()
-    # run_diffeomorph(args.inputs, args.output_dir)
-    savetest(args.inputs, args.output_dir)
+    run_diffeomorph(args.inputs, args.output_dir, args.maxdistortion, args.nsteps)
+    # savetest(args.inputs, args.output_dir)
 
 
 if __name__ == "__main__":
