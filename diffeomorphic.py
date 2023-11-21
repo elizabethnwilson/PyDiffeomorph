@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pathlib as pl
 from PIL import Image
-from scipy import griddata  # For interpolation
+from scipy.interpolate import griddata  # For interpolation
 
 
 class MatrixImage:
@@ -25,62 +25,82 @@ class MatrixImage:
                     # If the image didn't already have transparency,
                     # set this to true so resources are not wasted diffeomorphing
                     # an empty channel
-                    self._no_transparency = True
+                    self._no_transparency: bool = True
                 except ValueError as ve:
                     print("ERROR: This image could not be converted")
                     # This really should never run. The only way it would is if the user supplies an image of an accepted type but its data is broken.
                     raise ve
-            self._original = im
+            else:
+                self._no_transparency: bool = False
+
+            self._original: Image.Image = im
+
             # Increase image size per original script
             if upscale == True:
                 self._upscaled = im.resize(
                     (im.width * 2, im.height * 2),
                     resample=Image.Resampling.BILINEAR,  # Linear interpolation was used in the experiment
                 )
-                self._image_matrix = np.asarray(self._upscaled)
-                self._width = self._upscaled.width
-                self._height = self._upscaled.height
+                self._image_matrix: np.ndarray = np.asarray(self._upscaled)
+                self._width: int = self._upscaled.width
+                self._height: int = self._upscaled.height
             else:
-                self._image_matrix = np.asarray(im)
-                self._width = im.width
-                self._height = im.height
+                self._image_matrix: np.ndarray = np.asarray(im)
+                self._width: int = im.width
+                self._height: int = im.height
 
-        # Test this, might not work
-        if not self._image_matrix.any(np.nonzero(self._image_matrix)):
-            self._no_transparency = True
-        self._maxdistortion = maxdistortion
-        self._nsteps = nsteps
+        self._maxdistortion: int = maxdistortion
+        self._nsteps: int = nsteps
 
-    def _getdiffeo(self) -> np.ndarray:
+    def _getdiffeo(self):
         """
         This function is a one-to-one recreation of the getdiffeo function from
         the original script using NumPy.
+
+        In the interest of saving memory, this function does not return a 3D matrix
+        of the form fields like in the original, instead storing xin and yin in the
+        x_diffeo_field and y_diffeo_field attributes. This avoids copying the fields to
+        another array just to be indexed in interpolate_image().
         """
         ncomp: int = 6  # Amount of computations, 6 is used in original script
         # This is transformed to make the flow field
         # mesh[0] is XI, mesh[1] is YI
-        mesh: np.ndarray = np.mgrid[1 : self._width, 1 : self._height]
+        mesh: np.ndarray = np.mgrid[0 : self._width, 0 : self._height]
 
         # Create diffeomorphic warp field by adding random discrete cosine transformations
-        phase = MatrixImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * math.pi
-        amplitude_a = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
+        phase: np.ndarray = (
+            MatrixImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * math.pi
+        )
         # Separate amplitudes for x and y were implemented in an update to the original script.
-        amplitude_b = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
-        xn = np.zeros((self._width, self._height))
-        yn = np.zeros((self._width, self._height))
+        amplitude_a: np.ndarray = (
+            MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
+        )
+        amplitude_b: np.ndarray = (
+            MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
+        )
+        xn: np.ndarray = np.zeros((self._width, self._height))
+        yn: np.ndarray = np.zeros((self._width, self._height))
 
         # The main form field generation
         for xc in range(1, ncomp):
             for yc in range(1, ncomp):
-                xn = xn + amplitude_a[xc, yc] * math.cos(
-                    xc * mesh[0] / self._width * 2 * math.pi + phase[xc, yc, 1]
-                ) * math.cos(
-                    yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 2]
+                xn += (
+                    amplitude_a[xc, yc]
+                    * np.cos(
+                        xc * mesh[0] / self._width * 2 * math.pi + phase[xc, yc, 0]
+                    )
+                    * np.cos(
+                        yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 1]
+                    )
                 )
-                yn = yn + amplitude_b[xc, yc] * math.cos(
-                    xc * mesh[0] / self._width * 2 * math.pi + phase[xc, yc, 3]
-                ) * math.cos(
-                    yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 4]
+                yn += (
+                    amplitude_b[xc, yc]
+                    * np.cos(
+                        xc * mesh[0] / self._width * 2 * math.pi + phase[xc, yc, 2]
+                    )
+                    * np.cos(
+                        yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 3]
+                    )
                 )
 
         # Normalize to root mean square of warps in each direction
@@ -89,14 +109,15 @@ class MatrixImage:
         )  # ravel creates a vectorized array for the squaring operation.
         yn = yn / np.sqrt(np.mean(yn.ravel() ** 2))
 
-        yin = self._maxdistortion * yn / self._nsteps
-        xin = self._maxdistortion * xn / self._nsteps
+        xin: np.ndarray = self._maxdistortion * xn / self._nsteps
+        yin: np.ndarray = self._maxdistortion * yn / self._nsteps
 
-        return np.array(xin, yin)
+        self._x_diffeo_field: np.ndarray = xin
+        self._y_diffeo_field: np.ndarray = yin
 
-    def _interpolate_image(self, diffeo_field: np.ndarray):
+    def _interpolate_image(self):
         """
-        Gets matrix of xin, yin to cx, yx.
+        Gets matrix of getdiffeo's xin, yin to cx, yx.
 
         The original script creates a figure displaying a continuous circle of images generated in steps.
         Each quadrant of this circle relative to the beginning represents a new method of diffeomorphic scrambling,
@@ -108,23 +129,36 @@ class MatrixImage:
         Therefore, this script uses only the basic implementation, rather than generating multiple flow fields and
         making other transformations (for example, in quadrant 2, the new interpolation would be done using cx = cxf - cxa, etc.)
 
-        Uses SciPy griddata for interpolation.
+        Uses scipy.interpolate's griddata() for interpolation.
         """
-        cx = diffeo_field[0]
-        cy = diffeo_field[1]
+        cx: np.ndarray = self._x_diffeo_field
+        cy: np.ndarray = self._y_diffeo_field
 
-        mesh: np.ndarray = np.mgrid[1 : self._width, 1 : self._height]
+        mesh: np.ndarray = np.mgrid[0 : self._width, 0 : self._height]
+        # Images will always be output as RGBA, so we have four channels here.
+        interp_image: np.ndarray = np.empty((self._width, self._height, 4))
+        bg_fill: int = 255
+        # Original script casts to double-might need to do this as well to preserve precision
+        if self._no_transparency == True:
+            channel_range: range = range(0, 2)
+            interp_image[:, :, 3] = self._image_matrix[:, :, 3]
+        else:
+            channel_range: range = range(0, 3)
 
         # Interpolate using griddata
-        # Original script casts to double-might need to do this as well to preserve precision
-        interp_image = griddata(
-            (cx.ravel(), cy.ravel()),
-            self._image_matrix.reshape(
-                -1, 2
-            ),  # Test, because we might (probably) need to separate channels
-            mesh,
-            fill_value=255,  # 127 for gray?; perhaps let users specify bg value.
-        )  # method="linear" is the default
+        for channel in channel_range:
+            print(
+                cx.ravel().size,
+                cy.ravel().size,
+                self._image_matrix[:, :, channel].size,
+                mesh.size,
+            )
+            interp_image[:, :, channel] = griddata(
+                (cx.ravel(), cy.ravel()),  # Points and values might be swapped
+                self._image_matrix[:, :, channel],
+                mesh,
+                fill_value=bg_fill,  # 127 for gray?; perhaps let users specify bg value.
+            )  # method="linear" is the default
 
         # Clip values to [0, 255] TEST - may or may not be necessary
         interp_image = np.clip(interp_image, 0, 255)
@@ -143,9 +177,9 @@ class MatrixImage:
         Ability to return each step may be needed since the original script
         does this by default.
         """
-        # Only get one diffeomorphic form field; reasons listed in _interpolate_image()
-        self._diffeo_field: np.ndarray = self._getdiffeo()
-        diffeo_im: np.ndarray = self._interpolate_image(self._diffeo_field)
+        # Only get generate 1 diffeomorphic form field; reasons listed in _interpolate_image()
+        self._getdiffeo()
+        diffeo_im: np.ndarray = self._interpolate_image()
         im: Image.Image = Image.fromarray(diffeo_im)
         return im
 
@@ -169,9 +203,32 @@ class MatrixImage:
         return self._diffeomorph()
 
     @property
+    def x_diffeo_field(self) -> np.ndarray:
+        if self._x_diffeo_field:
+            return self._x_diffeo_field
+        else:
+            raise AttributeError(
+                "This image has not been diffeomorphed; there is no diffeomorphic form field to access"
+            )
+
+    @property
+    def y_diffeo_field(self) -> np.ndarray:
+        if self._y_diffeo_field:
+            return self._y_diffeo_field
+        else:
+            raise AttributeError(
+                "This image has not been diffeomorphed; there is no diffeomorphic form field to access"
+            )
+
+    @property
     def diffeo_field(self) -> np.ndarray:
-        if self._diffeo_field:
-            return self._diffeo_field
+        """
+        If used as a library, it may be beneficial to get a 3D matrix of the diffeomorphic
+        form fields, rather than accessing them independently. This attribute exists for this
+        purpose, but will use more memory as a result.
+        """
+        if self._x_diffeo_field and self._y_diffeo_field:
+            return np.dstack((self._x_diffeo_field, self._y_diffeo_field))
         else:
             raise AttributeError(
                 "This image has not been diffeomorphed; there is no diffeomorphic form field to access"
@@ -295,14 +352,14 @@ def run_diffeomorph(inputs: list, output_dir: pl.Path, maxdistortion: int, nstep
     """
     imdir = MatrixImageDir(inputs, output_dir, maxdistortion, nsteps)
     # Run the diffeomorph for every image in directory
-    # imdir.diffeomorph()
+    imdir.diffeomorph()
     imdir.save()
 
 
-def savetest(inputs: list, output_dir: pl.Path):
-    imdir = MatrixImageDir(inputs, output_dir)
-    imdir.upscale()
-    imdir.save()
+# def savetest(inputs: list, output_dir: pl.Path):
+#     imdir = MatrixImageDir(inputs, output_dir, args.maxdistortion, args.nsteps)
+#     imdir.upscale()
+#     imdir.save()
 
 
 def main():
