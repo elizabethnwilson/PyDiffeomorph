@@ -140,38 +140,38 @@ class MatrixImage:
         bg_fill: int = 255
         # Original script casts to double-might need to do this as well to preserve precision
         if self._no_transparency == True:
-            channel_range: range = range(0, 2)
+            print("Using _no_transparency = True")
+            channel_range: range = range(0, 3)
             interp_image[:, :, 3] = self._image_matrix[:, :, 3]
         else:
-            channel_range: range = range(0, 3)
+            channel_range: range = range(0, 4)
 
         # Interpolate using griddata
         for channel in channel_range:
-            # print(  # Debug
-            #     self._width,
-            #     self._height,
-            #     cx.size,
-            #     cy.size,
-            #     cx.ravel().size,
-            #     cy.ravel().size,
-            #     self._image_matrix[:, :, channel].size,
-            #     self._image_matrix[:, :, channel].ravel().shape,
-            #     mesh.size,
-            #     mesh.shape,
-            #     mesh[0].ravel().shape,
-            # )
+            # Debug
+            print(
+                f"self._width = {self._width}, self._height = {self._height}, cx.size = {cx.size}, cy.size = {cy.size}"
+            )
+            print(
+                f"cx.ravel().size = {cx.ravel().size}, cy.ravel().size = {cy.ravel().size}, self._image_matrix[:, :, channel] = {self._image_matrix[:, :, channel]}, self._image_matrix[:, :, channel].ravel().shape = {self._image_matrix[:, :, channel].ravel().shape}"
+            )
+            print(
+                f"mesh.size = {mesh.size}, mesh.shape = {mesh.shape}, mesh[0].ravel().shape = {mesh[0].ravel().shape}"
+            )
+            print(f"Channel range = {channel_range}")
+
             print("Status: Interpolating channel", channel)
             print("Channel array:", self._image_matrix[:, :, channel])
             interp_image[:, :, channel] = griddata(
-                (cy.ravel(), cx.ravel()),
-                self._image_matrix[:, :, channel].ravel(),
                 (mesh[1].ravel(), mesh[0].ravel()),
+                self._image_matrix[:, :, channel].ravel(),
+                (cy.ravel(), cx.ravel()),
                 fill_value=bg_fill,  # 127 for gray?; perhaps let users specify bg value.
             ).reshape((self._width, self._height))
             # May need a resize
 
         # Clip values to [0, 255] TEST - may or may not be necessary
-        # interp_image = np.clip(interp_image, 0, 255)
+        interp_image = np.clip(interp_image, 0, 255)
 
         return interp_image.astype(np.uint8)  # can be used with Image.fromarray()
 
