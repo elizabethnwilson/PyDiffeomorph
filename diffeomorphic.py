@@ -164,10 +164,10 @@ class MatrixImage:
             print("Channel array:", self._image_matrix[:, :, channel])
             interp_image[:, :, channel] = griddata(
                 (cy.ravel(), cx.ravel()),
-                self._image_matrix[:, :, channel].ravel(),
+                self._image_matrix[:, :, channel].astype(np.double).ravel(),
                 (mesh[1].ravel(), mesh[0].ravel()),
                 method="linear",
-                fill_value=bg_fill,  # 127 for gray?; perhaps let users specify bg value.
+                # fill_value=bg_fill,  # 127 for gray?; perhaps let users specify bg value.
             ).reshape((self._width, self._height))
             # May need a resize
             print("Min Value:", np.min(interp_image))
