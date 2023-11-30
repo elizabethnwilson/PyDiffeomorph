@@ -82,8 +82,8 @@ class MatrixImage:
         yn: np.ndarray = np.zeros((self._width, self._height))
 
         # The main form field generation
-        for xc in range(1, ncomp):
-            for yc in range(1, ncomp):
+        for xc in range(ncomp):
+            for yc in range(ncomp):
                 xn += (
                     amplitude_a[xc, yc]
                     * np.cos(
@@ -141,10 +141,10 @@ class MatrixImage:
         # Original script casts to double-might need to do this as well to preserve precision
         if self._no_transparency == True:
             print("Using _no_transparency = True")
-            channel_range: range = range(0, 3)
+            channel_range: range = range(3)  # Omit transparency layer
             interp_image[:, :, 3] = self._image_matrix[:, :, 3]
         else:
-            channel_range: range = range(0, 4)
+            channel_range: range = range(4)
 
         # Interpolate using griddata
         for channel in channel_range:
@@ -163,12 +163,15 @@ class MatrixImage:
             print("Status: Interpolating channel", channel)
             print("Channel array:", self._image_matrix[:, :, channel])
             interp_image[:, :, channel] = griddata(
-                (mesh[1].ravel(), mesh[0].ravel()),
-                self._image_matrix[:, :, channel].ravel(),
                 (cy.ravel(), cx.ravel()),
+                self._image_matrix[:, :, channel].ravel(),
+                (mesh[1].ravel(), mesh[0].ravel()),
+                method="linear",
                 fill_value=bg_fill,  # 127 for gray?; perhaps let users specify bg value.
             ).reshape((self._width, self._height))
             # May need a resize
+            print("Min Value:", np.min(interp_image))
+            print("Max Value:", np.max(interp_image))
 
         # Clip values to [0, 255] TEST - may or may not be necessary
         interp_image = np.clip(interp_image, 0, 255)
