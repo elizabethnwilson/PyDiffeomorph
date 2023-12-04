@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pathlib as pl
 from PIL import Image
-from scipy.interpolate import griddata  # For interpolation
+from scipy.interpolate import RectBivariateSpline  # For interpolation
 
 
 class MatrixImage:
@@ -102,18 +102,18 @@ class MatrixImage:
                         yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 3]
                     )
                 )
-
+        print(f"xn = {xn}, yn = {yn}")
         # Normalize to root mean square of warps in each direction
-        xn = xn / np.sqrt(
-            np.mean(xn.ravel() ** 2)
-        )  # ravel creates a vectorized array for the squaring operation.
+        # ravel creates a vectorized array for the squaring operation.
+        xn = xn / np.sqrt(np.mean(xn.ravel() ** 2))
         yn = yn / np.sqrt(np.mean(yn.ravel() ** 2))
 
         xin: np.ndarray = self._maxdistortion * xn / self._nsteps
         yin: np.ndarray = self._maxdistortion * yn / self._nsteps
+        print(f"xn post-RMS = {xn}, yn post-RMS = {yn}")
 
-        self._x_diffeo_field: np.ndarray = xin
-        self._y_diffeo_field: np.ndarray = yin
+        self._x_diffeo_field: np.ndarray = xn
+        self._y_diffeo_field: np.ndarray = yn
 
     def _interpolate_image(self):
         """
@@ -162,16 +162,17 @@ class MatrixImage:
 
             print("Status: Interpolating channel", channel)
             print("Channel array:", self._image_matrix[:, :, channel])
-            interp_image[:, :, channel] = griddata(
-                (cy.ravel(), cx.ravel()),
-                self._image_matrix[:, :, channel].astype(np.double).ravel(),
-                (mesh[1].ravel(), mesh[0].ravel()),
-                method="linear",
-                # fill_value=bg_fill,  # 127 for gray?; perhaps let users specify bg value.
-            ).reshape((self._width, self._height))
+            interp_image[:, :, channel] = RectBivariateSpline(
+                cy.ravel(),
+                cx.ravel(),
+                self._image_matrix[:, :, channel].astype(np.double),
+                # Linear interpolation
+                kx=1,
+                ky=1,
+            )
             # May need a resize
-            print("Min Value:", np.min(interp_image))
-            print("Max Value:", np.max(interp_image))
+            print("Min Value:", np.min(interp_image[:, :, channel]))
+            print("Max Value:", np.max(interp_image[:, :, channel]))
 
         # Clip values to [0, 255] TEST - may or may not be necessary
         interp_image = np.clip(interp_image, 0, 255)
