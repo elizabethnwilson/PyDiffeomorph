@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pathlib as pl
 from PIL import Image
-from scipy.interpolate import RectBivariateSpline  # For interpolation
+from scipy.interpolate import griddata  # For interpolation
 
 
 class MatrixImage:
@@ -135,6 +135,7 @@ class MatrixImage:
         cy: np.ndarray = self._y_diffeo_field
 
         mesh: np.ndarray = np.mgrid[0 : self._width, 0 : self._height]
+        print(mesh[0], mesh[1])
         # Images will always be output as RGBA, so we have four channels here.
         interp_image: np.ndarray = np.empty((self._width, self._height, 4))
         bg_fill: int = 255
@@ -162,13 +163,15 @@ class MatrixImage:
 
             print("Status: Interpolating channel", channel)
             print("Channel array:", self._image_matrix[:, :, channel])
-            interp_image[:, :, channel] = RectBivariateSpline(
-                cy.ravel(),
-                cx.ravel(),
+            print("Points length:", len((cy.ravel(), cx.ravel())[0]))
+            print("Mesh length:", len((mesh[1].ravel(), mesh[0].ravel())[0]))
+            print("Image matrix length:", len(self._image_matrix[:, :, channel][0]))
+            # test points = points.asanyarray() or whatever. test shape, size, etc. based on griddata source code
+            interp_image[:, :, channel] = griddata(
+                cy,
                 self._image_matrix[:, :, channel].astype(np.double),
-                # Linear interpolation
-                kx=1,
-                ky=1,
+                (mesh[1].ravel(), mesh[0].ravel()),
+                fill_value=bg_fill,
             )
             # May need a resize
             print("Min Value:", np.min(interp_image[:, :, channel]))
