@@ -3,7 +3,11 @@ import math
 import numpy as np
 import pathlib as pl
 from PIL import Image
-from scipy.interpolate import griddata  # For interpolation
+from scipy.interpolate import (
+    interpn,
+    griddata,
+    RectBivariateSpline,
+)  # For interpolation
 
 
 class MatrixImage:
@@ -112,8 +116,8 @@ class MatrixImage:
         yin: np.ndarray = self._maxdistortion * yn / self._nsteps
         print(f"xn post-RMS = {xn}, yn post-RMS = {yn}")
 
-        self._x_diffeo_field: np.ndarray = xn
-        self._y_diffeo_field: np.ndarray = yn
+        self._x_diffeo_field: np.ndarray = xin
+        self._y_diffeo_field: np.ndarray = yin
 
     def _interpolate_image(self):
         """
@@ -134,8 +138,8 @@ class MatrixImage:
         cx: np.ndarray = self._x_diffeo_field
         cy: np.ndarray = self._y_diffeo_field
 
-        mesh: np.ndarray = np.mgrid[0 : self._width, 0 : self._height]
-        print(mesh[0], mesh[1])
+        x_grid = np.arange(0, self._width)
+        y_grid = np.arange(0, self._height)
         # Images will always be output as RGBA, so we have four channels here.
         interp_image: np.ndarray = np.empty((self._width, self._height, 4))
         bg_fill: int = 255
@@ -156,24 +160,33 @@ class MatrixImage:
             print(
                 f"cx.ravel().size = {cx.ravel().size}, cy.ravel().size = {cy.ravel().size}, self._image_matrix[:, :, channel] = {self._image_matrix[:, :, channel]}, self._image_matrix[:, :, channel].ravel().shape = {self._image_matrix[:, :, channel].ravel().shape}"
             )
-            print(
-                f"mesh.size = {mesh.size}, mesh.shape = {mesh.shape}, mesh[0].ravel().shape = {mesh[0].ravel().shape}"
-            )
+            # print(
+            #     f"mesh.size = {mesh.size}, mesh.shape = {mesh.shape}, mesh[0].ravel().shape = {mesh[0].ravel().shape}"
+            # )
             print(f"Channel range = {channel_range}")
 
             print("Status: Interpolating channel", channel)
             print("Channel array:", self._image_matrix[:, :, channel])
             print("Points length:", len((cy.ravel(), cx.ravel())[0]))
-            print("Mesh length:", len((mesh[1].ravel(), mesh[0].ravel())[0]))
+            # print("Mesh length:", len((mesh[1].ravel(), mesh[0].ravel())[0]))
             print("Image matrix length:", len(self._image_matrix[:, :, channel][0]))
             # test points = points.asanyarray() or whatever. test shape, size, etc. based on griddata source code
-            interp_image[:, :, channel] = griddata(
-                cy,
-                self._image_matrix[:, :, channel].astype(np.double),
-                (mesh[1].ravel(), mesh[0].ravel()),
+            # Create interpolater
+            # interpolater = RectBivariateSpline(
+            #    y_grid, x_grid, self._image_matrix[:, :, channel], kx=1, ky=1
+            # )
+            # Evaluate at points defined by diffeo field
+            # interp_image[:, :, channel] = interpolater(
+            #     cy.ravel(), cx.ravel(), grid=False
+            # ).reshape(self._height, self._width)
+            interp_image[:, :, channel] = interpn(
+                (y_grid, x_grid),
+                self._image_matrix[:, :, channel],
+                (cy.ravel(), cx.ravel()),
+                method="linear",
+                bounds_error=False,
                 fill_value=bg_fill,
-            )
-            # May need a resize
+            ).reshape(self._height, self._width)
             print("Min Value:", np.min(interp_image[:, :, channel]))
             print("Max Value:", np.max(interp_image[:, :, channel]))
 
