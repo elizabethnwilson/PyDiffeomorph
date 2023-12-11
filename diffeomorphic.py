@@ -1,13 +1,10 @@
 import argparse
-import math
+from math import pi
 import numpy as np
 import pathlib as pl
 from PIL import Image
-from scipy.interpolate import (
-    interpn,
-    griddata,
-    RectBivariateSpline,
-)  # For interpolation
+from scipy.interpolate import interpn, RectBivariateSpline
+from scipy.ndimage import rotate
 
 
 class MatrixImage:
@@ -45,11 +42,12 @@ class MatrixImage:
                     (im.width * 2, im.height * 2),
                     resample=Image.Resampling.BILINEAR,  # Linear interpolation was used in the experiment
                 )
-                self._image_matrix: np.ndarray = np.asarray(self._upscaled)
+                # Copy to avoid array being read-only. Should not be a massive performance hit.
+                self._image_matrix: np.ndarray = np.asarray(self._upscaled).copy()
                 self._width: int = self._upscaled.width
                 self._height: int = self._upscaled.height
             else:
-                self._image_matrix: np.ndarray = np.asarray(im)
+                self._image_matrix: np.ndarray = np.asarray(im).copy()
                 self._width: int = im.width
                 self._height: int = im.height
         print(self._image_matrix[:, :, 3], self._no_transparency)
@@ -72,16 +70,10 @@ class MatrixImage:
         mesh: np.ndarray = np.mgrid[0 : self._width, 0 : self._height]
 
         # Create diffeomorphic warp field by adding random discrete cosine transformations
-        phase: np.ndarray = (
-            MatrixImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * math.pi
-        )
+        phase: np.ndarray = MatrixImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * pi
         # Separate amplitudes for x and y were implemented in an update to the original script.
-        amplitude_a: np.ndarray = (
-            MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
-        )
-        amplitude_b: np.ndarray = (
-            MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * math.pi
-        )
+        amplitude_a: np.ndarray = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * pi
+        amplitude_b: np.ndarray = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * pi
         xn: np.ndarray = np.zeros((self._width, self._height))
         yn: np.ndarray = np.zeros((self._width, self._height))
 
@@ -90,21 +82,13 @@ class MatrixImage:
             for yc in range(ncomp):
                 xn += (
                     amplitude_a[xc, yc]
-                    * np.cos(
-                        xc * mesh[1] / self._width * 2 * math.pi + phase[xc, yc, 0]
-                    )
-                    * np.cos(
-                        yc * mesh[0] / self._height * 2 * math.pi + phase[xc, yc, 1]
-                    )
+                    * np.cos(xc * mesh[1] / self._width * 2 * pi + phase[xc, yc, 0])
+                    * np.cos(yc * mesh[0] / self._height * 2 * pi + phase[xc, yc, 1])
                 )
                 yn += (
                     amplitude_b[xc, yc]
-                    * np.cos(
-                        xc * mesh[0] / self._width * 2 * math.pi + phase[xc, yc, 2]
-                    )
-                    * np.cos(
-                        yc * mesh[1] / self._height * 2 * math.pi + phase[xc, yc, 3]
-                    )
+                    * np.cos(xc * mesh[0] / self._width * 2 * pi + phase[xc, yc, 2])
+                    * np.cos(yc * mesh[1] / self._height * 2 * pi + phase[xc, yc, 3])
                 )
         print(f"xn = {xn}, yn = {yn}")
         # Normalize to root mean square of warps in each direction
@@ -114,10 +98,28 @@ class MatrixImage:
 
         xin: np.ndarray = self._maxdistortion * xn / self._nsteps
         yin: np.ndarray = self._maxdistortion * yn / self._nsteps
-        print(f"xn post-RMS = {xn}, yn post-RMS = {yn}")
+        print(f"xn post-RMS = {xin}, yn post-RMS = {yin}")
+        print(f"Max = {xin.max()}, Min = {xin.min()}")
 
         self._x_diffeo_field: np.ndarray = xin
         self._y_diffeo_field: np.ndarray = yin
+
+    # def _map_diffeo(self, output_coordinates: tuple) -> tuple:
+    #     """
+    #     Used in interpolation to map output coordinates to input coordinates.
+    #
+    #     Uses instance variable _transform_iterable to track iterations, reset for each channel.
+    #     """
+    #     input_coordinates: tuple = (
+    #         output_coordinates[1]
+    #         + self._y_diffeo_field.ravel()[self._transform_iterable],
+    #         output_coordinates[0]
+    #         + self._x_diffeo_field.ravel()[self._transform_iterable],
+    #     )
+    #     # print("ti =", self._transform_iterable)
+    #     print(input_coordinates)
+    #     self._transform_iterable += 1
+    #     return input_coordinates
 
     def _interpolate_image(self):
         """
@@ -135,8 +137,16 @@ class MatrixImage:
 
         Uses scipy.interpolate's griddata() for interpolation.
         """
-        cx: np.ndarray = self._x_diffeo_field
         cy: np.ndarray = self._y_diffeo_field
+        cx: np.ndarray = self._x_diffeo_field
+        # Add meshgrid (calculate points based on vectors generated by _getdiffeo()) and apply mask
+        mesh = np.mgrid[0 : self._width, 0 : self._height]
+        cy = mesh[1] + cy
+        cx = mesh[0] + cx
+        # Make sure interpolation points are not out-of-bounds
+        mask = (cx < 1) | (cx > self._width) | (cy < 1) | (cy > self._height)
+        cy[mask] = 1
+        cx[mask] = 1
 
         x_grid = np.arange(0, self._width)
         y_grid = np.arange(0, self._height)
@@ -172,21 +182,23 @@ class MatrixImage:
             print("Image matrix length:", len(self._image_matrix[:, :, channel][0]))
             # test points = points.asanyarray() or whatever. test shape, size, etc. based on griddata source code
             # Create interpolater
-            # interpolater = RectBivariateSpline(
-            #    y_grid, x_grid, self._image_matrix[:, :, channel], kx=1, ky=1
-            # )
+            interpolater = RectBivariateSpline(
+                y_grid, x_grid, self._image_matrix[:, :, channel], kx=1, ky=1
+            )
             # Evaluate at points defined by diffeo field
-            # interp_image[:, :, channel] = interpolater(
-            #     cy.ravel(), cx.ravel(), grid=False
+            interp_image[:, :, channel] = interpolater(
+                cy.ravel(), cx.ravel(), grid=False
+            ).reshape(self._width, self._height)
+            # Rotate clockwise since output will be rotated due to allowing for non-square images.
+
+            # interp_image[:, :, channel] = interpn(
+            #     (x_grid, y_grid),
+            #     self._image_matrix[:, :, channel],
+            #     (cx.ravel(), cy.ravel()),
+            #     method="linear",
+            #     bounds_error=False,
+            #     fill_value=bg_fill,
             # ).reshape(self._height, self._width)
-            interp_image[:, :, channel] = interpn(
-                (y_grid, x_grid),
-                self._image_matrix[:, :, channel],
-                (cy.ravel(), cx.ravel()),
-                method="linear",
-                bounds_error=False,
-                fill_value=bg_fill,
-            ).reshape(self._height, self._width)
             print("Min Value:", np.min(interp_image[:, :, channel]))
             print("Max Value:", np.max(interp_image[:, :, channel]))
 
