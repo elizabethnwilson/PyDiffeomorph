@@ -3,21 +3,24 @@ from math import pi
 import numpy as np
 import pathlib as pl
 from PIL import Image
-from scipy.interpolate import interpn, RectBivariateSpline
-from scipy.ndimage import rotate
+from scipy.interpolate import RectBivariateSpline
 
 
-class MatrixImage:
+class DiffeoImage:
     # Random-number generator for whole class so we don't re-seed every image
     _rand = np.random.default_rng()
 
     def __init__(self, filepath: pl.Path, maxdistortion, nsteps, upscale=True):
         """
-        Initializes a MatrixImage object with necessary properties for diffeomorphic scrambling.
+        Initializes a DiffeoImage object with necessary properties for diffeomorphic scrambling.
 
         Although the original study uses upscaling, it can be disabled here if using as a library
         in order for flexibility; not all uses of diffeomorphic scrambling may demand upscaling beforehand.
         """
+
+        self._maxdistortion: int = maxdistortion
+        self._nsteps: int = nsteps
+
         with Image.open(filepath) as im:
             if im.mode != "RGBA":
                 # Images have 3 color channels and 1 transparency channel. All images will be output with a transparency channel, saved as pngs.
@@ -42,57 +45,112 @@ class MatrixImage:
                     (im.width * 2, im.height * 2),
                     resample=Image.Resampling.BILINEAR,  # Linear interpolation was used in the experiment
                 )
-                # Copy to avoid array being read-only. Should not be a massive performance hit.
-                self._image_matrix: np.ndarray = np.asarray(self._upscaled).copy()
-                self._width: int = self._upscaled.width
-                self._height: int = self._upscaled.height
+
+                # Skip padding for square images
+                if self._upscaled.width == self._upscaled.height:
+                    self._image_matrix: np.ndarray = np.asarray(self._upscaled)
+                    transparency_check_matrix: np.ndarray = self._image_matrix
+                    skip_padding: bool = True
+                else:
+                    unpadded_image_matrix: np.ndarray = np.asarray(self._upscaled)
+                    transparency_check_matrix: np.ndarray = unpadded_image_matrix
+                    skip_padding: bool = False
+
+                # Use longer side for square image size so no data is lost
+                if self._upscaled.width >= self._upscaled.height:
+                    self._image_size: int = self._upscaled.width
+                else:
+                    self._image_size: int = self._upscaled.height
             else:
-                self._image_matrix: np.ndarray = np.asarray(im).copy()
-                self._width: int = im.width
-                self._height: int = im.height
-        print(self._image_matrix[:, :, 3], self._no_transparency)
-        self._maxdistortion: int = maxdistortion
-        self._nsteps: int = nsteps
+                if im.width == im.height:
+                    self._image_matrix: np.ndarray = np.asarray(im)
+                    transparency_check_matrix: np.ndarray = self._image_matrix
+                    skip_padding: bool = True
+                else:
+                    unpadded_image_matrix: np.ndarray = np.asarray(im)
+                    transparency_check_matrix: np.ndarray = unpadded_image_matrix
+                    skip_padding: bool = False
+
+                if im.width >= im.height:
+                    self._image_size: int = im.width
+                else:
+                    self._image_size: int = im.height
+
+        if np.all(transparency_check_matrix[:, :, 3] == 255):
+            self._no_transparency: bool = True
+
+        if skip_padding == True:
+            return
+
+        # Pad image when not already square
+        if self._no_transparency == True:
+            self._image_matrix: np.ndarray = np.full(
+                (self._image_size, self._image_size, 4), 255
+            )  # 255 for white, 127 for grey
+        else:
+            # Assume if the image is transparent that the padding should also be transparent
+            self._image_matrix: np.ndarray = np.zeros(
+                (self._image_size, self._image_size, 4)
+            )
+
+        x_size, y_size, _ = unpadded_image_matrix.shape
+        if x_size > y_size:
+            # Only pad vertically if width is greater than height
+            image_start: int = round((self._image_size - y_size) / 2)
+            image_end: int = image_start + y_size
+            self._image_matrix[:, image_start:image_end, :] = unpadded_image_matrix
+        else:
+            # Pad horizontally otherwise
+            image_start: int = round((self._image_size - x_size) / 2)
+            image_end: int = image_start + x_size
+            self._image_matrix[:, image_start:image_end, :] = unpadded_image_matrix
 
     def _getdiffeo(self):
         """
         This function is a one-to-one recreation of the getdiffeo function from
         the original script using NumPy.
 
-        In the interest of saving memory, this function does not return a 3D matrix
-        of the form fields like in the original, instead storing xin and yin in the
+        In the interest of saving memory, this function does not return a matrix
+        of the flow field like in the original, instead storing xin and yin in the
         x_diffeo_field and y_diffeo_field attributes. This avoids copying the fields to
         another array just to be indexed in interpolate_image().
         """
         ncomp: int = 6  # Amount of computations, 6 is used in original script
         # This is transformed to make the flow field
         # mesh[0] is XI, mesh[1] is YI
-        mesh: np.ndarray = np.mgrid[0 : self._width, 0 : self._height]
+        mesh: np.ndarray = np.mgrid[0 : self._image_size, 0 : self._image_size]
 
         # Create diffeomorphic warp field by adding random discrete cosine transformations
-        phase: np.ndarray = MatrixImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * pi
+        phase: np.ndarray = DiffeoImage._rand.random(size=(ncomp, ncomp, 4)) * 2 * pi
         # Separate amplitudes for x and y were implemented in an update to the original script.
-        amplitude_a: np.ndarray = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * pi
-        amplitude_b: np.ndarray = MatrixImage._rand.random(size=(ncomp, ncomp)) * 2 * pi
-        xn: np.ndarray = np.zeros((self._width, self._height))
-        yn: np.ndarray = np.zeros((self._width, self._height))
+        amplitude_a: np.ndarray = DiffeoImage._rand.random(size=(ncomp, ncomp)) * 2 * pi
+        amplitude_b: np.ndarray = DiffeoImage._rand.random(size=(ncomp, ncomp)) * 2 * pi
+        xn: np.ndarray = np.zeros((self._image_size, self._image_size))
+        yn: np.ndarray = np.zeros((self._image_size, self._image_size))
 
         # The main form field generation
         for xc in range(ncomp):
             for yc in range(ncomp):
                 xn += (
                     amplitude_a[xc, yc]
-                    * np.cos(xc * mesh[1] / self._width * 2 * pi + phase[xc, yc, 0])
-                    * np.cos(yc * mesh[0] / self._height * 2 * pi + phase[xc, yc, 1])
+                    * np.cos(
+                        xc * mesh[1] / self._image_size * 2 * pi + phase[xc, yc, 0]
+                    )
+                    * np.cos(
+                        yc * mesh[0] / self._image_size * 2 * pi + phase[xc, yc, 1]
+                    )
                 )
                 yn += (
                     amplitude_b[xc, yc]
-                    * np.cos(xc * mesh[0] / self._width * 2 * pi + phase[xc, yc, 2])
-                    * np.cos(yc * mesh[1] / self._height * 2 * pi + phase[xc, yc, 3])
+                    * np.cos(
+                        xc * mesh[0] / self._image_size * 2 * pi + phase[xc, yc, 2]
+                    )
+                    * np.cos(
+                        yc * mesh[1] / self._image_size * 2 * pi + phase[xc, yc, 3]
+                    )
                 )
         print(f"xn = {xn}, yn = {yn}")
         # Normalize to root mean square of warps in each direction
-        # ravel creates a vectorized array for the squaring operation.
         xn = xn / np.sqrt(np.mean(xn.ravel() ** 2))
         yn = yn / np.sqrt(np.mean(yn.ravel() ** 2))
 
@@ -103,23 +161,6 @@ class MatrixImage:
 
         self._x_diffeo_field: np.ndarray = xin
         self._y_diffeo_field: np.ndarray = yin
-
-    # def _map_diffeo(self, output_coordinates: tuple) -> tuple:
-    #     """
-    #     Used in interpolation to map output coordinates to input coordinates.
-    #
-    #     Uses instance variable _transform_iterable to track iterations, reset for each channel.
-    #     """
-    #     input_coordinates: tuple = (
-    #         output_coordinates[1]
-    #         + self._y_diffeo_field.ravel()[self._transform_iterable],
-    #         output_coordinates[0]
-    #         + self._x_diffeo_field.ravel()[self._transform_iterable],
-    #     )
-    #     # print("ti =", self._transform_iterable)
-    #     print(input_coordinates)
-    #     self._transform_iterable += 1
-    #     return input_coordinates
 
     def _interpolate_image(self):
         """
@@ -140,19 +181,18 @@ class MatrixImage:
         cy: np.ndarray = self._y_diffeo_field
         cx: np.ndarray = self._x_diffeo_field
         # Add meshgrid (calculate points based on vectors generated by _getdiffeo()) and apply mask
-        mesh = np.mgrid[0 : self._width, 0 : self._height]
+        mesh = np.mgrid[0 : self._image_size, 0 : self._image_size]
         cy = mesh[1] + cy
         cx = mesh[0] + cx
         # Make sure interpolation points are not out-of-bounds
-        mask = (cx < 1) | (cx > self._width) | (cy < 1) | (cy > self._height)
+        mask = (cx < 1) | (cx > self._image_size) | (cy < 1) | (cy > self._image_size)
         cy[mask] = 1
         cx[mask] = 1
 
-        x_grid = np.arange(0, self._width)
-        y_grid = np.arange(0, self._height)
+        x_grid = np.arange(0, self._image_size)
+        y_grid = np.arange(0, self._image_size)
         # Images will always be output as RGBA, so we have four channels here.
-        interp_image: np.ndarray = np.empty((self._width, self._height, 4))
-        bg_fill: int = 255
+        interp_image: np.ndarray = np.empty((self._image_size, self._image_size, 4))
         # Original script casts to double-might need to do this as well to preserve precision
         if self._no_transparency == True:
             print("Using _no_transparency = True")
@@ -165,7 +205,7 @@ class MatrixImage:
         for channel in channel_range:
             # Debug
             print(
-                f"self._width = {self._width}, self._height = {self._height}, cx.size = {cx.size}, cy.size = {cy.size}"
+                f"self._image_size = {self._image_size}, self._image_size = {self._image_size}, cx.size = {cx.size}, cy.size = {cy.size}"
             )
             print(
                 f"cx.ravel().size = {cx.ravel().size}, cy.ravel().size = {cy.ravel().size}, self._image_matrix[:, :, channel] = {self._image_matrix[:, :, channel]}, self._image_matrix[:, :, channel].ravel().shape = {self._image_matrix[:, :, channel].ravel().shape}"
@@ -183,13 +223,12 @@ class MatrixImage:
             # test points = points.asanyarray() or whatever. test shape, size, etc. based on griddata source code
             # Create interpolater
             interpolater = RectBivariateSpline(
-                y_grid, x_grid, self._image_matrix[:, :, channel], kx=1, ky=1
+                x_grid, y_grid, self._image_matrix[:, :, channel], kx=1, ky=1
             )
             # Evaluate at points defined by diffeo field
             interp_image[:, :, channel] = interpolater(
-                cy.ravel(), cx.ravel(), grid=False
-            ).reshape(self._width, self._height)
-            # Rotate clockwise since output will be rotated due to allowing for non-square images.
+                cx.ravel(), cy.ravel(), grid=False
+            ).reshape(self._image_size, self._image_size)
 
             # interp_image[:, :, channel] = interpn(
             #     (x_grid, y_grid),
@@ -198,7 +237,7 @@ class MatrixImage:
             #     method="linear",
             #     bounds_error=False,
             #     fill_value=bg_fill,
-            # ).reshape(self._height, self._width)
+            # ).reshape(self._image_size, self._image_size)
             print("Min Value:", np.min(interp_image[:, :, channel]))
             print("Max Value:", np.max(interp_image[:, :, channel]))
 
@@ -277,12 +316,12 @@ class MatrixImage:
             )
 
 
-class MatrixImageDir:
+class DiffeoImageDir:
     def __init__(
         self, inputs: list, output_dir: pl.Path, maxdistortion: int, nsteps: int
     ):
         """
-        Until an operation has been run on self._images, the values are entire MatrixImage objects.
+        Until an operation has been run on self._images, the values are entire DiffeoImage objects.
         Afterward, they become images that can be saved.
         """
         self._inputs: list = inputs
@@ -293,14 +332,14 @@ class MatrixImageDir:
         self._accepted_file_types: set = {".jpg", ".png", ".webp"}
         self._images: dict = {}
 
-        # Updates self._images dict and initializes MatrixImage objects
+        # Updates self._images dict and initializes DiffeoImage objects
         for input in self._inputs:
             if input.is_file():
                 # Logic for an input file
                 if input.suffix in self._accepted_file_types:
                     self._images |= {
-                        input: MatrixImage(input, maxdistortion, nsteps)
-                    }  # Path: MatrixImage
+                        input: DiffeoImage(input, maxdistortion, nsteps)
+                    }  # Path: DiffeoImage
                 else:
                     raise TypeError(
                         f"Unrecognized file type. Supported file types are: {self._accepted_file_types}"
@@ -310,7 +349,7 @@ class MatrixImageDir:
                 for filepath in input.iterdir():
                     if filepath.suffix in self._accepted_file_types:
                         self._images |= {
-                            filepath: MatrixImage(filepath, maxdistortion, nsteps)
+                            filepath: DiffeoImage(filepath, maxdistortion, nsteps)
                         }
                     else:
                         raise TypeError(
@@ -323,8 +362,8 @@ class MatrixImageDir:
 
     def upscale(self):
         """
-        MatrixImages are upscaled by default due to the specifications in the original research paper.
-        This behavior can be modified by setting upscale=False when instantiating an MatrixImage (such as if you use MatrixImage in a library).
+        DiffeoImages are upscaled by default due to the specifications in the original research paper.
+        This behavior can be modified by setting upscale=False when instantiating a DiffeoImage (such as if you use DiffeoImage in a library).
         """
         for filepath, file in self._images.items():
             self._images |= {filepath: file.upscaled}
@@ -334,7 +373,7 @@ class MatrixImageDir:
         Save all files in the output directory
         """
         for filepath, file in self._images.items():
-            if type(file) == MatrixImage:
+            if type(file) != Image.Image:
                 raise TypeError(
                     "No operation has been run on these files; they will not be saved."
                 )
@@ -392,14 +431,14 @@ def run_diffeomorph(inputs: list, output_dir: pl.Path, maxdistortion: int, nstep
     """
     Uses an input directory or file and an output directory to find images to run the diffeomorphic scrambling on.
     """
-    imdir = MatrixImageDir(inputs, output_dir, maxdistortion, nsteps)
+    imdir = DiffeoImageDir(inputs, output_dir, maxdistortion, nsteps)
     # Run the diffeomorph for every image in directory
     imdir.diffeomorph()
     imdir.save()
 
 
 # def savetest(inputs: list, output_dir: pl.Path):
-#     imdir = MatrixImageDir(inputs, output_dir, args.maxdistortion, args.nsteps)
+#     imdir = DiffeoImageDir(inputs, output_dir, args.maxdistortion, args.nsteps)
 #     imdir.upscale()
 #     imdir.save()
 
