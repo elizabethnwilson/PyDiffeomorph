@@ -1,6 +1,19 @@
 import PySimpleGUI as sg
 import diffeomorphic as diffeo
 import pathlib as pl
+import functools
+from inspect import unwrap
+
+
+def progressupdate(
+    func, pbar_key: str, label_key: str, values: dict, progress: int, label: str
+):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    return wrapper
+
 
 sg.theme("SystemDefault")
 
@@ -48,28 +61,61 @@ while True:
         # Debug
         print(values)
         # Check that files/folders are supplied for program to run
-        if values["-INPUTS-"] == "" and values["-OUTPUT-"] == "":
+        if not values["-INPUTS-"] and not values["-OUTPUT-"]:
             window["-ERROR-"].update(
                 value="ERROR: One or more files/folders must be supplied as an input; exactly one folder must be supplied as an output",
                 text_color="red",
             )
-        elif values["-INPUTS-"] == "":
+            # Skips diffeo when missing values
+            continue
+        elif not values["-INPUTS-"]:
             window["-ERROR-"].update(
                 value="ERROR: One or more files/folders must be supplied as an input",
                 text_color="red",
             )
-        elif values["-OUTPUT-"] == "":
+            continue
+        elif not values["-OUTPUT-"]:
             window["-ERROR-"].update(
                 value="ERROR: Exactly one folder must be supplied as an output",
                 text_color="red",
             )
+            continue
+
+        # Clear error
+        window["-ERROR-"].update(value="")
+
+        _, progress_values = sg.Window(
+            "Running diffeomorph...",
+            [
+                [sg.Text("", key="-PBARLABEL-")],
+                [sg.ProgressBar(100, orientation="horizontal", key="-PBAR-")],
+            ],
+        ).read(close=True)
+
+        # Fix iteration using dynamic updating (percentage based, file amount based)
+        diffeo.DiffeoImage.__init__ = progressupdate(
+            diffeo.DiffeoImage.__init__, "-PBAR-", "-PBARLABEL-", progress_values, 5
+        )
+        diffeo.DiffeoImage._getdiffeo = progressupdate(
+            diffeo.DiffeoImage._getdiffeo, "-PBAR-", "-PBARLABEL-", progress_values, 20
+        )
+        diffeo.DiffeoImage._interpolate_image = progressupdate(
+            diffeo.DiffeoImage._interpolate_image,
+            "-PBAR-",
+            "-PBARLABEL-",
+            progress_values,
+            40,
+        )
+        diffeo.DiffeoImageDir.save = progressupdate(
+            diffeo.DiffeoImageDir.save, "-PBAR-", "-PBARLABEL-", progress_values, 80
+        )
 
         inputs: list = [pl.Path(file) for file in values["-INPUTS-"].split(";")]
         output_dir: pl.Path = pl.Path(values["-OUTPUT-"])
         maxdistortion: int = int(values["-MAXDISTORTION-"])
         nsteps: int = int(values["-NSTEPS-"])
         save_steps: bool = values["-SAVE_STEPS-"]
-        no_upscaling: bool = not values["-NO_UPSCALING-"]
+        upscale: bool = not values["-NO_UPSCALING-"]
 
         diffeo.run_diffeomorph(
             inputs,
@@ -77,5 +123,5 @@ while True:
             maxdistortion,
             nsteps,
             save_steps,
-            no_upscaling,
+            upscale,
         )
