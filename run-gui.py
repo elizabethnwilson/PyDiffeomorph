@@ -6,8 +6,23 @@ from inspect import unwrap
 
 
 def progressupdate(
-    func, pbar_key: str, label_key: str, values: dict, progress: int, label: str
+    func,
+    pbar_key: str,
+    label_key: str,
+    values: dict,
+    stage_progress: int,
+    num_files: int,
+    label: str,
+    runs_each_file: bool = False,
 ):
+    """
+    Dynamically updates progress bar's status based on number of files.
+
+    stage_progress is the value the progress bar should be in after each
+    function has run for the last time. Combine with runs_each_file
+    to have progress increment proportionally based on completion of each file.
+    """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
@@ -21,11 +36,15 @@ layout = [
     [sg.T("")],
     [
         sg.Text("Select files and/or folders to diffeomorph: "),
-        sg.Input(key="-INPUTS-"),
+        sg.Input(key="-INPUTS-", disabled=True),
         sg.FilesBrowse(),
     ],
     [sg.T("")],
-    [sg.Text("Select an output folder: "), sg.Input(key="-OUTPUT-"), sg.FolderBrowse()],
+    [
+        sg.Text("Select an output folder: "),
+        sg.Input(key="-OUTPUT-", disabled=True),
+        sg.FolderBrowse(),
+    ],
     [sg.T("")],
     [
         sg.Text("Set maxdistortion (default is 80): "),
@@ -92,7 +111,16 @@ while True:
             ],
         ).read(close=True)
 
-        # Fix iteration using dynamic updating (percentage based, file amount based)
+        inputs: list = [pl.Path(file) for file in values["-INPUTS-"].split(";")]
+        output_dir: pl.Path = pl.Path(values["-OUTPUT-"])
+        maxdistortion: int = int(values["-MAXDISTORTION-"])
+        nsteps: int = int(values["-NSTEPS-"])
+        save_steps: bool = values["-SAVE_STEPS-"]
+        upscale: bool = not values["-NO_UPSCALING-"]
+
+        num_files: int = len(inputs)
+
+        # Wrap functions that should update progress bar when run
         diffeo.DiffeoImage.__init__ = progressupdate(
             diffeo.DiffeoImage.__init__, "-PBAR-", "-PBARLABEL-", progress_values, 5
         )
@@ -110,13 +138,6 @@ while True:
             diffeo.DiffeoImageDir.save, "-PBAR-", "-PBARLABEL-", progress_values, 80
         )
 
-        inputs: list = [pl.Path(file) for file in values["-INPUTS-"].split(";")]
-        output_dir: pl.Path = pl.Path(values["-OUTPUT-"])
-        maxdistortion: int = int(values["-MAXDISTORTION-"])
-        nsteps: int = int(values["-NSTEPS-"])
-        save_steps: bool = values["-SAVE_STEPS-"]
-        upscale: bool = not values["-NO_UPSCALING-"]
-
         diffeo.run_diffeomorph(
             inputs,
             output_dir,
@@ -125,3 +146,12 @@ while True:
             save_steps,
             upscale,
         )
+
+        # Unwrap functions for next iteration of loop since values can change
+        # and to avoid wrapping a wrapped function again
+        diffeo.DiffeoImage.__init__ = unwrap(diffeo.DiffeoImageDir.__init__)
+        diffeo.DiffeoImage._getdiffeo = unwrap(diffeo.DiffeoImage._getdiffeo)
+        diffeo.DiffeoImage._interpolate_image = unwrap(
+            diffeo.DiffeoImage._interpolate_image
+        )
+        diffeo.DiffeoImageDir.save = unwrap(diffeo.DiffeoImageDir.save)
