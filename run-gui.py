@@ -7,10 +7,6 @@ from math import floor
 from time import sleep
 
 
-class PopupClosed(Exception):
-    pass
-
-
 class ProgressUpdater:
     """
     Dynamically updates progress bar's status based on number of files. Adds
@@ -55,18 +51,18 @@ class ProgressUpdater:
 
         if not runs_each_file:
             self.increment_value: int = stage_progress
+            self.runs_each_file = False
             return
 
+        self.runs_each_file = True
         # Calculate amount to increment when wrapped function is called based on number of files
         self.file_count: int = 1
         self.increment_value: int = floor(stage_progress / num_files)
 
     def __call__(self, *args, **kwargs):
-        # Statement where wrapped functions are called should have
-        # a try clause. This also updates the window.
-        event, _ = self.window.read()
-        if event == sg.WIN_CLOSED:
-            raise PopupClosed
+        """
+        WARNING: wrapped functions may raise FileNotFoundError.
+        """
 
         # When using, try to avoid letting this exceed pbar's max
         ProgressUpdater.current_progress += self.increment_value
@@ -74,22 +70,23 @@ class ProgressUpdater:
             current_count=ProgressUpdater.current_progress
         )
 
-        expanded_label = f"File #{self.file_count}: {self.label}"
-        self.window[self.label_key].update(value=expanded_label)
-        self.file_count += 1
+        if self.runs_each_file:
+            # Since file count is an attribute of each object rather than the class,
+            # only use it when it is set to avoid an AttributeError
+            extended_label: str = f"File #{self.file_count}: {self.label}"
+            self.file_count += 1
+        else:
+            extended_label: str = self.label
 
-        function_return = self.func(*args, **kwargs)
+        self.window[self.label_key].update(value=extended_label)
 
-        # Do before and after so execution terminates before return
-        # when window is closed. Unfortunately, there is no way to
-        # stop execution while the wrappedfunction is running, so
-        # there may be a delay before the operation actually stops,
-        # especially if the wrapped function is _interpolate_image().
-        event, _ = self.window.read()
-        if event == sg.WIN_CLOSED:
-            raise PopupClosed
+        # This updates the window since we are operating within one iteration of event loop.
+        self.window.refresh()
 
-        return function_return
+        return self.func(*args, **kwargs)
+
+    def __get__(self, instance, owner):
+        return functools.partial(self.__call__, instance)
 
 
 sg.theme("SystemDefault")
@@ -118,6 +115,12 @@ layout = [
     ],
     [sg.Checkbox("Save each step? ", key="-SAVE_STEPS-")],
     [sg.Checkbox("Disable upscaling?", key="-NO_UPSCALING-")],
+    [sg.Text("", key="-PBARLABEL-", visible=False)],
+    [
+        sg.ProgressBar(
+            100, orientation="horizontal", key="-PBAR-", style="classic", visible=False
+        )
+    ],
     [sg.Text("", key="-ERROR-")],
     [sg.Button("Run")],
 ]
@@ -165,13 +168,8 @@ while True:
         # Clear error
         window["-ERROR-"].update(value="")
 
-        pbar_popup = sg.Window(
-            "Running diffeomorph...",
-            [
-                [sg.Text("", key="-PBARLABEL-")],
-                [sg.ProgressBar(100, orientation="horizontal", key="-PBAR-")],
-            ],
-        )
+        window["-PBAR-"].update(current_count=0, visible=True)
+        window["-PBARLABEL-"].update(visible=True)
 
         inputs: list = [pl.Path(file) for file in values["-INPUTS-"].split(";")]
         output_dir: pl.Path = pl.Path(values["-OUTPUT-"])
@@ -187,7 +185,7 @@ while True:
             diffeo.DiffeoImage.__init__,
             "-PBAR-",
             "-PBARLABEL-",
-            pbar_popup,
+            window,
             5,
             num_files,
             "Initializing image...",
@@ -196,7 +194,7 @@ while True:
             diffeo.DiffeoImage._getdiffeo,
             "-PBAR-",
             "-PBARLABEL-",
-            pbar_popup,
+            window,
             25,
             num_files,
             "Generating diffeomorphic flow field...",
@@ -205,16 +203,16 @@ while True:
             diffeo.DiffeoImage._interpolate_image,
             "-PBAR-",
             "-PBARLABEL-",
-            pbar_popup,
+            window,
             65,
             num_files,
-            "Interpolating image (this may take a while)...",
+            "Interpolating image (this may take a while; do not close window!)...",
         )
         diffeo.DiffeoImageDir.save = ProgressUpdater(
             diffeo.DiffeoImageDir.save,
             "-PBAR-",
             "-PBARLABEL-",
-            pbar_popup,
+            window,
             5,
             num_files,
             "Saving files (do not close window!)...",
@@ -230,20 +228,19 @@ while True:
                 save_steps,
                 upscale,
             )
-        except PopupClosed:
-            # Just a way to exit execution early safely
-            pass
+        except FileNotFoundError:
+            window["-INPUTS-"].update(value="")
+            window["-OUTPUTS-"].update(value="")
+            window["-ERROR-"].update(value="ERROR: One or more files not found")
         else:
-            pbar_popup["-PBAR-"].update(current_count=100, bar_color="green")
-            pbar_popup["-PBARLABEL-"].update(
-                value="Diffeomorphing complete! The window will now close."
-            )
-            sleep(3)
+            window["-PBAR-"].update(current_count=100)
+            window["-PBARLABEL-"].update(value="Diffeomorphing complete!")
+            sleep(2)
         finally:
             # Cleanup for next run
-            event, _ = pbar_popup.read()
-            if event != sg.WIN_CLOSED:
-                pbar_popup.close()
+
+            window["-PBAR-"].update(current_count=0, visible=False)
+            window["-PBARLABEL-"].update(value="", visible=False)
 
             # Unwrap functions for next iteration of loop since values can change
             # and to avoid wrapping a wrapped function again
