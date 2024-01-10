@@ -83,6 +83,8 @@ class ProgressUpdater:
         # This updates the window since we are operating within one iteration of event loop.
         self.window.refresh()
 
+        print(*args, **kwargs)
+
         return self.func(*args, **kwargs)
 
     def __get__(self, instance, owner):
@@ -220,6 +222,8 @@ while True:
         )
 
         try:
+            print(inputs, output_dir, maxdistortion, nsteps, save_steps, upscale)
+            # Somehow, the output dir's type is int in DiffeoImageDir's init function on second run - fix
             diffeo.run_diffeomorph(
                 inputs,
                 output_dir,
@@ -235,6 +239,7 @@ while True:
         else:
             window["-PBAR-"].update(current_count=100)
             window["-PBARLABEL-"].update(value="Diffeomorphing complete!")
+            window.refresh()
             sleep(2)
         finally:
             # Cleanup for next run
