@@ -2,7 +2,6 @@ import PySimpleGUI as sg
 import diffeomorphic as diffeo
 import pathlib as pl
 import functools
-from inspect import unwrap
 from math import floor
 from time import sleep
 
@@ -56,13 +55,66 @@ class ProgressUpdater:
 
         self.runs_each_file = True
         # Calculate amount to increment when wrapped function is called based on number of files
+        # This is the current file number
         self.file_count: int = 1
-        self.increment_value: int = floor(stage_progress / num_files)
+        # This is total files
+        self.num_files: int = num_files
+        self.increment_value: int = floor(stage_progress / self.num_files)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(
+        self,
+        *args,
+        **kwargs,
+    ):
         """
         WARNING: wrapped functions may raise FileNotFoundError.
         """
+
+        if kwargs.get("update_wrapper_attributes", False) == True:
+            """
+            Updates values for future runs; assumes a value should not be updated if
+            a replacement value is not supplied.
+
+            This should be called if using in event loop for future iterations.
+
+            This has to be part of __call__ because __get__ does not allow accessing
+            instance methods or attributes.
+
+            WARNING: Because this has to be a part of call and accesses kwargs, this
+            decorator class is NOT guaranteed to work with all functions. It will only work
+            if update_wrapper_attributes is not a parameter of the function itself, since
+            it could potentially be set to True and then this code runs, producing unintended
+            behavior. This is not the best solution to the problem, but it works as intended
+            in this case.
+            """
+            if kwargs.get("runs_each_file", None) is not None:
+                self.runs_each_file = kwargs.get("runs_each_file", None)
+            if kwargs.get("pbar_key", None) is not None:
+                self.pbar_key = kwargs.get("pbar_key", None)
+            if kwargs.get("label_key", None) is not None:
+                self.label_key = kwargs.get("label_key", None)
+            if kwargs.get("window", None) is not None:
+                self.window = kwargs.get("window", None)
+            if kwargs.get("num_files", None) is not None:
+                self.num_files = kwargs.get("num_files", None)
+            if kwargs.get("label", None) is not None:
+                self.label = kwargs.get("label", None)
+
+            if kwargs.get("stage_progress", None) is not None:
+                if not kwargs.get("runs_each_file", None):
+                    self.increment_value = kwargs.get("stage_progress", None)
+                else:
+                    self.increment_value = floor(
+                        kwargs.get("stage_progress", None) / self.num_files
+                    )
+
+            if not kwargs.get("reset_file_count", True):
+                return
+
+            if self.runs_each_file:
+                self.file_count = 1
+
+            return
 
         # When using, try to avoid letting this exceed pbar's max
         ProgressUpdater.current_progress += self.increment_value
@@ -127,7 +179,12 @@ layout = [
     [sg.Button("Run")],
 ]
 
-window = sg.Window("PyDiffeomorph", layout)
+window: sg.Window = sg.Window("PyDiffeomorph", layout)
+
+# Once functions are wrapped, this allows them to prevent being wrapped again
+# Functions have to be wrapped in event loop because some values can only
+# be obtained there
+functions_wrapped: bool = False
 
 while True:
     event, values = window.read()
@@ -183,43 +240,61 @@ while True:
         num_files: int = len(inputs)
 
         # Wrap functions that should update progress bar when run
-        diffeo.DiffeoImage.__init__ = ProgressUpdater(
-            diffeo.DiffeoImage.__init__,
-            "-PBAR-",
-            "-PBARLABEL-",
-            window,
-            5,
-            num_files,
-            "Initializing image...",
-        )
-        diffeo.DiffeoImage._getdiffeo = ProgressUpdater(
-            diffeo.DiffeoImage._getdiffeo,
-            "-PBAR-",
-            "-PBARLABEL-",
-            window,
-            25,
-            num_files,
-            "Generating diffeomorphic flow field...",
-        )
-        diffeo.DiffeoImage._interpolate_image = ProgressUpdater(
-            diffeo.DiffeoImage._interpolate_image,
-            "-PBAR-",
-            "-PBARLABEL-",
-            window,
-            65,
-            num_files,
-            "Interpolating image (this may take a while; do not close window!)...",
-        )
-        diffeo.DiffeoImageDir.save = ProgressUpdater(
-            diffeo.DiffeoImageDir.save,
-            "-PBAR-",
-            "-PBARLABEL-",
-            window,
-            5,
-            num_files,
-            "Saving files (do not close window!)...",
-            runs_each_file=False,
-        )
+        if not functions_wrapped:
+            diffeo.DiffeoImage.__init__ = ProgressUpdater(
+                diffeo.DiffeoImage.__init__,
+                "-PBAR-",
+                "-PBARLABEL-",
+                window,
+                5,
+                num_files,
+                "Initializing image...",
+            )
+            diffeo.DiffeoImage._getdiffeo = ProgressUpdater(
+                diffeo.DiffeoImage._getdiffeo,
+                "-PBAR-",
+                "-PBARLABEL-",
+                window,
+                25,
+                num_files,
+                "Generating diffeomorphic flow field...",
+            )
+            diffeo.DiffeoImage._interpolate_image = ProgressUpdater(
+                diffeo.DiffeoImage._interpolate_image,
+                "-PBAR-",
+                "-PBARLABEL-",
+                window,
+                65,
+                num_files,
+                "Interpolating image (this may take a while; do not close window!)...",
+            )
+            diffeo.DiffeoImageDir.save = ProgressUpdater(
+                diffeo.DiffeoImageDir.save,
+                "-PBAR-",
+                "-PBARLABEL-",
+                window,
+                5,
+                num_files,
+                "Saving files (do not close window!)...",
+                runs_each_file=False,
+            )
+            functions_wrapped = True
+        else:
+            # Update values if functions are already wrapped instead of rewrapping
+            # Only updating num_files (and resetting file_count) because that can
+            # change between runs
+            diffeo.DiffeoImage.__init__(
+                update_wrapper_attributes=True, num_files=num_files
+            )
+            diffeo.DiffeoImage._getdiffeo(
+                update_wrapper_attributes=True, num_files=num_files
+            )
+            diffeo.DiffeoImage._interpolate_image(
+                update_wrapper_attributes=True, num_files=num_files
+            )
+            diffeo.DiffeoImageDir.save(
+                update_wrapper_attributes=True, num_files=num_files
+            )
 
         try:
             print(inputs, output_dir, maxdistortion, nsteps, save_steps, upscale)
@@ -246,14 +321,5 @@ while True:
 
             window["-PBAR-"].update(current_count=0, visible=False)
             window["-PBARLABEL-"].update(value="", visible=False)
-
-            # Unwrap functions for next iteration of loop since values can change
-            # and to avoid wrapping a wrapped function again
-            diffeo.DiffeoImage.__init__ = unwrap(diffeo.DiffeoImageDir.__init__)
-            diffeo.DiffeoImage._getdiffeo = unwrap(diffeo.DiffeoImage._getdiffeo)
-            diffeo.DiffeoImage._interpolate_image = unwrap(
-                diffeo.DiffeoImage._interpolate_image
-            )
-            diffeo.DiffeoImageDir.save = unwrap(diffeo.DiffeoImageDir.save)
 
             ProgressUpdater.reset()
