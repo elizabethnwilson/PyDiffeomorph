@@ -135,8 +135,6 @@ class ProgressUpdater:
         # This updates the window since we are operating within one iteration of event loop.
         self.window.refresh()
 
-        print(*args, **kwargs)
-
         return self.func(*args, **kwargs)
 
     def __get__(self, instance, owner):
@@ -149,23 +147,38 @@ layout = [
     [sg.T("")],
     [
         sg.Text("Select files to diffeomorph: "),
-        sg.Input(key="-INPUTS-"),
+        sg.Input(
+            key="-INPUTS-",
+            tooltip="File names should be separated with ';' and no spaces.\nFolder names can also be supplied; ensure that you do not separately supply an image from that\nfolder or it will be diffeomorphed twice.",
+        ),
         sg.FilesBrowse(),
     ],
     [sg.T("")],
     [
         sg.Text("Select an output folder: "),
-        sg.Input(key="-OUTPUT-"),
+        sg.Input(key="-OUTPUT-", tooltip="Only one output folder is allowed."),
         sg.FolderBrowse(),
     ],
     [sg.T("")],
     [
         sg.Text("Set maxdistortion (default is 80): "),
-        sg.Input(default_text="80", key="-MAXDISTORTION-", enable_events=True),
+        sg.Input(
+            default_text="80",
+            key="-MAXDISTORTION-",
+            enable_events=True,
+            size=5,
+            tooltip="Mturk perceptual ratings based on maxdistortion=80.\nmaxdistortion is the amount the images are distorted by, divided by nsteps.",
+        ),
     ],
     [
         sg.Text("Set nsteps (default is 20): "),
-        sg.Input(default_text="20", key="-NSTEPS-", enable_events=True),
+        sg.Input(
+            default_text="20",
+            key="-NSTEPS-",
+            enable_events=True,
+            size=5,
+            tooltip="Mturk perceptual ratings based on nsteps=20\nnsteps is the amount of steps the operation takes to produce the final image.",
+        ),
     ],
     [sg.Checkbox("Save each step? ", key="-SAVE_STEPS-")],
     [sg.Checkbox("Disable upscaling?", key="-NO_UPSCALING-")],
@@ -201,8 +214,6 @@ while True:
             window["-NSTEPS-"].update(values["-NSTEPS-"][:-1])
 
     if event == "Run":
-        # Debug
-        print(values)
         # Check that files/folders are supplied for program to run
         if not values["-INPUTS-"] and not values["-OUTPUT-"]:
             window["-ERROR-"].update(
@@ -297,8 +308,6 @@ while True:
             )
 
         try:
-            print(inputs, output_dir, maxdistortion, nsteps, save_steps, upscale)
-            # Somehow, the output dir's type is int in DiffeoImageDir's init function on second run - fix
             diffeo.run_diffeomorph(
                 inputs,
                 output_dir,
@@ -318,7 +327,6 @@ while True:
             sleep(2)
         finally:
             # Cleanup for next run
-
             window["-PBAR-"].update(current_count=0, visible=False)
             window["-PBARLABEL-"].update(value="", visible=False)
 
