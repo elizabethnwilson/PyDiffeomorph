@@ -47,6 +47,7 @@ class ProgressUpdater:
         self.label_key: str = label_key
         self.window: sg.Window = window
         self.label = label
+        self.num_files: int = num_files
 
         if not runs_each_file:
             self.increment_value: int = stage_progress
@@ -58,7 +59,6 @@ class ProgressUpdater:
         # This is the current file number
         self.file_count: int = 1
         # This is total files
-        self.num_files: int = num_files
         self.increment_value: int = floor(stage_progress / self.num_files)
 
     def __call__(
@@ -89,24 +89,25 @@ class ProgressUpdater:
             """
             old_num_files = self.num_files
             if kwargs.get("runs_each_file", None) is not None:
-                self.runs_each_file = kwargs.get("runs_each_file", None)
+                self.runs_each_file = kwargs.get("runs_each_file")
             if kwargs.get("pbar_key", None) is not None:
-                self.pbar_key = kwargs.get("pbar_key", None)
+                self.pbar_key = kwargs.get("pbar_key")
             if kwargs.get("label_key", None) is not None:
-                self.label_key = kwargs.get("label_key", None)
+                self.label_key = kwargs.get("label_key")
             if kwargs.get("window", None) is not None:
-                self.window = kwargs.get("window", None)
+                self.window = kwargs.get("window")
             if kwargs.get("num_files", None) is not None:
-                self.num_files = kwargs.get("num_files", None)
+                self.num_files = kwargs.get("num_files")
             if kwargs.get("label", None) is not None:
-                self.label = kwargs.get("label", None)
+                self.label = kwargs.get("label")
 
+            # Needs to check if stage_progress is there again
             if (
                 kwargs.get("stage_progress", None) is not None
                 or self.num_files != old_num_files
             ):
-                if not kwargs.get("runs_each_file", None):
-                    self.increment_value = kwargs.get("stage_progress", None)
+                if kwargs.get("runs_each_file", None) is not None:
+                    self.increment_value = kwargs.get("stage_progress")
                 else:
                     self.increment_value = floor(
                         kwargs.get("stage_progress", None) / self.num_files
