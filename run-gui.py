@@ -87,6 +87,7 @@ class ProgressUpdater:
             behavior. This is not the best solution to the problem, but it works as intended
             in this case.
             """
+            old_num_files = self.num_files
             if kwargs.get("runs_each_file", None) is not None:
                 self.runs_each_file = kwargs.get("runs_each_file", None)
             if kwargs.get("pbar_key", None) is not None:
@@ -100,7 +101,10 @@ class ProgressUpdater:
             if kwargs.get("label", None) is not None:
                 self.label = kwargs.get("label", None)
 
-            if kwargs.get("stage_progress", None) is not None:
+            if (
+                kwargs.get("stage_progress", None) is not None
+                or self.num_files != old_num_files
+            ):
                 if not kwargs.get("runs_each_file", None):
                     self.increment_value = kwargs.get("stage_progress", None)
                 else:
