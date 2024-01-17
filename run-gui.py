@@ -42,24 +42,23 @@ class ProgressUpdater:
         runs_each_file: bool = True,
     ):
         functools.update_wrapper(self, func)
-        self.func = func
-        self.pbar_key: str = pbar_key
-        self.label_key: str = label_key
-        self.window: sg.Window = window
-        self.label = label
-        self.num_files: int = num_files
+        self._func = func
+        self._pbar_key: str = pbar_key
+        self._label_key: str = label_key
+        self._window: sg.Window = window
+        self._label = label
+        self._num_files: int = num_files
+        self._stage_progress: int = stage_progress
 
         if not runs_each_file:
-            self.increment_value: int = stage_progress
-            self.runs_each_file = False
+            self._increment_value: int = self._stage_progress
+            self._runs_each_file = False
             return
 
-        self.runs_each_file = True
-        # Calculate amount to increment when wrapped function is called based on number of files
-        # This is the current file number
-        self.file_count: int = 1
-        # This is total files
-        self.increment_value: int = floor(stage_progress / self.num_files)
+        self._runs_each_file = True
+
+        self._current_file: int = 1
+        self._increment_value: int = floor(self._stage_progress / self._num_files)
 
     def __call__(
         self,
@@ -78,7 +77,7 @@ class ProgressUpdater:
             This should be called if using in event loop for future iterations.
 
             This has to be part of __call__ because __get__ does not allow accessing
-            instance methods or attributes.
+            instance methods or attributes due to returning a partial function.
 
             WARNING: Because this has to be a part of call and accesses kwargs, this
             decorator class is NOT guaranteed to work with all functions. It will only work
@@ -87,60 +86,56 @@ class ProgressUpdater:
             behavior. This is not the best solution to the problem, but it works as intended
             in this case.
             """
-            old_num_files = self.num_files
-            if kwargs.get("runs_each_file", None) is not None:
-                self.runs_each_file = kwargs.get("runs_each_file")
+            # ALl of these attributes are always set in __init__
             if kwargs.get("pbar_key", None) is not None:
-                self.pbar_key = kwargs.get("pbar_key")
+                self._pbar_key = kwargs.get("pbar_key")
             if kwargs.get("label_key", None) is not None:
-                self.label_key = kwargs.get("label_key")
+                self._label_key = kwargs.get("label_key")
             if kwargs.get("window", None) is not None:
-                self.window = kwargs.get("window")
-            if kwargs.get("num_files", None) is not None:
-                self.num_files = kwargs.get("num_files")
+                self._window = kwargs.get("window")
             if kwargs.get("label", None) is not None:
-                self.label = kwargs.get("label")
+                self._label = kwargs.get("label")
+            if kwargs.get("num_files", None) is not None:
+                self._num_files = kwargs.get("num_files")
+            if kwargs.get("runs_each_file", None) is not None:
+                self._runs_each_file = kwargs.get("runs_each_file")
+            if kwargs.get("stage_progress", None) is not None:
+                self._stage_progress = kwargs.get("stage_progress")
 
-            # Needs to check if stage_progress is there again
-            if (
-                kwargs.get("stage_progress", None) is not None
-                or self.num_files != old_num_files
-            ):
-                if kwargs.get("runs_each_file", None) is not None:
-                    self.increment_value = kwargs.get("stage_progress")
-                else:
-                    self.increment_value = floor(
-                        kwargs.get("stage_progress", None) / self.num_files
-                    )
+            # Allows for switching between an each file progress update to one-time progress update
+            if self._runs_each_file:
+                self._increment_value = floor(self._stage_progress / self._num_files)
+            else:
+                self._increment_value = self._stage_progress
 
             if not kwargs.get("reset_file_count", True):
                 return
 
-            if self.runs_each_file:
-                self.file_count = 1
+            if self._runs_each_file:
+                self._current_file = 1
 
             return
 
         # When using, try to avoid letting this exceed pbar's max
-        ProgressUpdater.current_progress += self.increment_value
-        self.window[self.pbar_key].update(
+        ProgressUpdater.current_progress += self._increment_value
+        self._window[self._pbar_key].update(
             current_count=ProgressUpdater.current_progress
         )
 
-        if self.runs_each_file:
+        if self._runs_each_file:
             # Since file count is an attribute of each object rather than the class,
             # only use it when it is set to avoid an AttributeError
-            extended_label: str = f"File #{self.file_count}: {self.label}"
-            self.file_count += 1
+            extended_label: str = f"File #{self._current_file}: {self._label}"
+            self._current_file += 1
         else:
-            extended_label: str = self.label
+            extended_label: str = self._label
 
-        self.window[self.label_key].update(value=extended_label)
+        self._window[self._label_key].update(value=extended_label)
 
         # This updates the window since we are operating within one iteration of event loop.
-        self.window.refresh()
+        self._window.refresh()
 
-        return self.func(*args, **kwargs)
+        return self._func(*args, **kwargs)
 
     def __get__(self, instance, owner):
         return functools.partial(self.__call__, instance)
