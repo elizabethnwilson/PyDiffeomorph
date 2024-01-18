@@ -1,4 +1,4 @@
-# py-diffeomorph
+# PyDiffeomorph
 
 This python script aims to translate the MATLAB script created by Stojanoski & Cusack (2014) into Python for ease of use across multiple systems.
 
