@@ -116,15 +116,15 @@ class DiffeoImage:
             unpadded_image_matrix = np.dstack((unpadded_image_matrix, alpha_channel))
 
         if x_size > y_size:
-            # Only pad vertically if width is greater than height
+            # Only pad horizontally if height is greater than width
             image_start: int = round((self._image_size - y_size) / 2)
             image_end: int = image_start + y_size
             self._image_matrix[:, image_start:image_end, :] = unpadded_image_matrix
         else:
-            # Pad horizontally otherwise
+            # Pad vertically otherwise
             image_start: int = round((self._image_size - x_size) / 2)
             image_end: int = image_start + x_size
-            self._image_matrix[:, image_start:image_end, :] = unpadded_image_matrix
+            self._image_matrix[image_start:image_end, :, :] = unpadded_image_matrix
 
     def _getdiffeo(self):
         """
