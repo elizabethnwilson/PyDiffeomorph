@@ -500,10 +500,7 @@ def run_diffeomorph(
 
 def main():
     args = setup()
-    if args.no_upscale == True:
-        upscale: bool = False
-    else:
-        upscale: bool = True
+    upscale = not args.no_upscale
     run_diffeomorph(
         args.inputs,
         args.output_dir,

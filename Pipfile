@@ -7,8 +7,10 @@ name = "pypi"
 numpy = "*"
 pillow = "*"
 scipy = "*"
+pysimplegui = "*"
 
 [dev-packages]
+pyinstaller = "*"
 
 [requires]
 python_version = "3.11"
