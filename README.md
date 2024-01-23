@@ -10,6 +10,11 @@ Sources:
 
 The original project's license is provided in [this attribution file](ATTRIBUTION). This project is also released under the MIT License.
 
+## Attribution
+Seeing as this project is intended to be used in research, if you use this project in your study _please attribute me_ (and of course, the original study). If you use this project, either for research or not, I would love to hear from you! You can reach me at the email on my GitHub profile.
+
+If you want to use my code in your project, don't hesitate to reach out to me! Or, you can simply follow the license. I would be more than happy to contribute to any projects interested in this algorithm.
+
 ## Installation
 ### Windows
 Go to this project's [release page](https://github.com/elizabethnwilson/PyDiffeomorph/releases/latest) and download PyDiffeomorph.exe. The other file (PyDiffeomorph) will not run on your machine. Once you have downloaded the file, you can run it like any other program.
@@ -37,6 +42,7 @@ If you want to build your own executable, you should instead run:
 ```
 pipenv install -d
 ```
+and use PyInstaller to create the executable for your platform. You may need to install additional libraries.
 
 To run the GUI version of the program:
 ```
@@ -47,3 +53,14 @@ To run the script without GUI:
 ```
 pipenv run diffeomorphic.py
 ```
+
+## Using as a Library
+I wrote this code so that it can be used in other projects. If you want to do so, simply put diffeomorphic.py in your project (and this project's LICENSE in the same directory) and import it into your project. For example,
+```python
+import diffeomorphic as diffeo
+```
+You can then use diffeomorphic's `run_diffeomorph()` function to run a full diffeomorph operation, using the parameters `inputs` (a list of pathlib Path objects), `output_dir` (a pathlib Path object), `maxdistortion` (an int), `nsteps` (an int), `save_steps` (a bool), and `upscale` (a bool).
+
+You can also import just the `DiffeoImage` class if you wish to implement just parts of the process, or want to implement your own method of handling the images once they have been generated. The diffeomorphed image can be accessed from the object's `diffeomorphed` attribute (which effectively runs the opperation).
+
+This section exists in lieu of proper documentation; I may create real documentation in the future if it seems necessary. You can feel free to open an issue if you run into any problems and I can try to help you resolve it.
