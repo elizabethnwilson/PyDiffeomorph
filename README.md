@@ -64,3 +64,13 @@ You can then use diffeomorphic's `run_diffeomorph()` function to run a full diff
 You can also import just the `DiffeoImage` class if you wish to implement just parts of the process, or want to implement your own method of handling the images once they have been generated. The diffeomorphed image can be accessed from the object's `diffeomorphed` attribute (which effectively runs the opperation).
 
 This section exists in lieu of proper documentation; I may create real documentation in the future if it seems necessary. You can feel free to open an issue if you run into any problems and I can try to help you resolve it.
+
+## Projects Used
+Here is a list of the projects I used in order to create PyDiffeomorph. Without these programs and libraries, it would not have been possible to do this in Python. The authors have my sincere thanks for providing detailed and accurate documentation.
+
+- NumPy
+- Pillow
+- Pipenv
+- PyInstaller
+- PySimpleGUI
+- SciPy
