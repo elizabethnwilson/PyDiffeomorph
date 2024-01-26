@@ -11,7 +11,7 @@ Sources:
 The original project's license is provided in [this attribution file](ATTRIBUTION). This project is also released under the MIT License.
 
 ## Attribution
-Seeing as this project is intended to be used in research, if you use this project in your study _please attribute me_ (and of course, the original study). If you use this project, either for research or not, I would love to hear from you! You can reach me at the email on my GitHub profile.
+Seeing as this project is intended to be used in research, if you use this project in your study, _please attribute me_ (and of course, the original study). If you use this project, either for research or not, I would love to hear from you! You can reach me at the email on my GitHub profile.
 
 If you want to use my code in your project, don't hesitate to reach out to me! Or, you can simply follow the license. I would be more than happy to contribute to any projects interested in this algorithm.
 
