@@ -25,7 +25,7 @@ The first time you run the program, there is a chance that Windows will stop the
 Go to the [release page](https://github.com/elizabethnwilson/PyDiffeomorph/releases/latest) and download PyDiffeomorph. You can run this file from your terminal (e.g., `./PyDiffeomorph` while in the same directory), or write a .desktop file for it if you want to use it like other applications. Chances are if you are downloading this, you already know what you are doing.
 
 ### Manual Installation
-This program was written using `pipenv` to manage dependencies. You can install `pipenv` as described by the authors (here)[https://github.com/pypa/pipenv#installation]. Once you have it installed, do the following:
+This program was written using `pipenv` to manage dependencies. You can install `pipenv` as described by the authors [here](https://github.com/pypa/pipenv#installation). Once you have it installed, do the following:
 
 First, clone and enter the repository:
 ```
